@@ -4,6 +4,8 @@
   "description": "Saaphzone AQI Monitoring Portal — Decoupled 3-Tier Architecture with PostgreSQL",
   "private": true,
   "scripts": {
+    "start": "npm --prefix backend start",
+    "dev": "npm --prefix backend run dev",
     "db:init": "node database/init.js",
     "db:seed": "node database/seed.js",
     "backend:start": "npm --prefix backend start",

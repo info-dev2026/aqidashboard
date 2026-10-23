@@ -1,0 +1,520 @@
+{
+  "info": {
+    "name": "Saaphzone AQI Monitoring Portal API",
+    "description": "Postman API Collection for testing Saaphzone AQI Monitoring Portal (PostgreSQL backend). Includes authentication, site management, device control, telemetry ingestion, and historical readings.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000/api",
+      "type": "string"
+    },
+    {
+      "key": "authToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "deviceApiKey",
+      "value": "maaps_5ffa73ec19b83a8432c61eddf9c7c1a926a40e6bdd4ad665",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "0. Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/health",
+          "host": ["{{baseUrl}}"],
+          "path": ["health"]
+        },
+        "description": "Check if backend API and PostgreSQL database are online."
+      }
+    },
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "Admin Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.token) {",
+                  "    pm.collectionVariables.set('authToken', json.token);",
+                  "    console.log('Saved authToken:', json.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"Sz9#vK!7mP@26%AdmX\",\n  \"role\": \"admin\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["login"]
+            },
+            "description": "Logs in as Administrator. The test script automatically saves the JWT token into {{authToken}}."
+          }
+        },
+        {
+          "name": "Service Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.token) {",
+                  "    pm.collectionVariables.set('authToken', json.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"service\",\n  \"password\": \"Sv8!wL#4qR&26*EngY\",\n  \"role\": \"service\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["login"]
+            }
+          }
+        },
+        {
+          "name": "Client Login (Escorts)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.token) {",
+                  "    pm.collectionVariables.set('authToken', json.token);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"escorts\",\n  \"password\": \"ChangeMe#Client1\",\n  \"role\": \"client\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["login"]
+            }
+          }
+        },
+        {
+          "name": "Get Current User Profile (/api/me)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["me"]
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["logout"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Monitoring Sites",
+      "item": [
+        {
+          "name": "Get All Sites",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sites",
+              "host": ["{{baseUrl}}"],
+              "path": ["sites"]
+            }
+          }
+        },
+        {
+          "name": "Create Monitoring Site",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Greater Noida Tech Hub\",\n  \"client\": \"Escorts Kubota Ltd\",\n  \"project\": \"NCR Ambient Network\",\n  \"lat\": 28.47,\n  \"lng\": 77.50\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/sites",
+              "host": ["{{baseUrl}}"],
+              "path": ["sites"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Monitoring Devices",
+      "item": [
+        {
+          "name": "Get All Devices",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/devices",
+              "host": ["{{baseUrl}}"],
+              "path": ["devices"]
+            }
+          }
+        },
+        {
+          "name": "Get Device API Key (Admin/Service)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.api_key) {",
+                  "    pm.collectionVariables.set('deviceApiKey', json.api_key);",
+                  "    console.log('Saved deviceApiKey:', json.api_key);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/devices/MAAPS-0012/key",
+              "host": ["{{baseUrl}}"],
+              "path": ["devices", "MAAPS-0012", "key"]
+            }
+          }
+        },
+        {
+          "name": "Create New Device",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": \"MAAPS-0088\",\n  \"site_code\": \"S1\",\n  \"location\": \"Warehouse East Gate\",\n  \"dev_type\": \"maaps\",\n  \"dp_warn\": 1200,\n  \"dp_crit\": 1500,\n  \"sp_enabled\": true,\n  \"sp25\": 60,\n  \"sp10\": 100,\n  \"sp_band\": 10\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/devices",
+              "host": ["{{baseUrl}}"],
+              "path": ["devices"]
+            }
+          }
+        },
+        {
+          "name": "Remote Device Control (Power/Rain/Setpoints)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"power\": \"on\",\n  \"transmit\": 1,\n  \"raining\": 0,\n  \"p_inlet\": 920,\n  \"p_outlet\": 340,\n  \"sp_enabled\": 1,\n  \"sp25\": 65,\n  \"sp10\": 105\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/devices/MAAPS-0012/control",
+              "host": ["{{baseUrl}}"],
+              "path": ["devices", "MAAPS-0012", "control"]
+            }
+          }
+        },
+        {
+          "name": "Get Device Reading History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/devices/MAAPS-0012/history",
+              "host": ["{{baseUrl}}"],
+              "path": ["devices", "MAAPS-0012", "history"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Device Telemetry Ingestion (Device -> Cloud)",
+      "item": [
+        {
+          "name": "Ingest Telemetry Reading (Normal Air)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Device-Key",
+                "value": "{{deviceApiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": \"MAAPS-0012\",\n  \"pm25\": 32.4,\n  \"pm10\": 68.2,\n  \"p_inlet\": 960,\n  \"p_outlet\": 350,\n  \"raining\": 0,\n  \"transmit\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ingest",
+              "host": ["{{baseUrl}}"],
+              "path": ["ingest"]
+            },
+            "description": "Simulates MAAPS ambient device posting real-time PM2.5, PM10, differential pressure, and rain status. Returns computed AQI and effective fan/power state."
+          }
+        },
+        {
+          "name": "Ingest Telemetry Reading (High PM / Severe)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Device-Key",
+                "value": "{{deviceApiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": \"MAAPS-0012\",\n  \"pm25\": 165.0,\n  \"pm10\": 320.0,\n  \"p_inlet\": 1450,\n  \"p_outlet\": 220,\n  \"raining\": 0,\n  \"transmit\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ingest",
+              "host": ["{{baseUrl}}"],
+              "path": ["ingest"]
+            }
+          }
+        },
+        {
+          "name": "Ingest Telemetry Reading (Raining -> Auto Off)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Device-Key",
+                "value": "{{deviceApiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": \"MAAPS-0012\",\n  \"pm25\": 24.0,\n  \"pm10\": 48.0,\n  \"p_inlet\": 800,\n  \"p_outlet\": 300,\n  \"raining\": 1,\n  \"transmit\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/ingest",
+              "host": ["{{baseUrl}}"],
+              "path": ["ingest"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. User Management (Admin Only)",
+      "item": [
+        {
+          "name": "List All Users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": ["{{baseUrl}}"],
+              "path": ["users"]
+            }
+          }
+        },
+        {
+          "name": "Create New User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"maruti_client\",\n  \"password\": \"Maruti#Pass2026\",\n  \"role\": \"client\",\n  \"name\": \"Maruti Suzuki India\",\n  \"client\": \"Maruti Suzuki Ltd\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/users",
+              "host": ["{{baseUrl}}"],
+              "path": ["users"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Security Audit & Maintenance",
+      "item": [
+        {
+          "name": "Get Security Audit Logs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/audit",
+              "host": ["{{baseUrl}}"],
+              "path": ["audit"]
+            }
+          }
+        },
+        {
+          "name": "Sweep Stale Devices Offline",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/sweep",
+              "host": ["{{baseUrl}}"],
+              "path": ["sweep"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
