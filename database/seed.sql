@@ -17,11 +17,15 @@ INSERT INTO users (username, pass_hash, role, name, client) VALUES
 ON CONFLICT (username) DO UPDATE SET pass_hash = EXCLUDED.pass_hash;
 
 -- 2. Insert Initial Monitoring Sites
-INSERT INTO sites (code, name, client, project, lat, lng) VALUES
-('S1', 'Faridabad Plant-1', 'Escorts Kubota Ltd',      'EKL Ambient Network', 28.41, 77.31),
-('S2', 'Faridabad Plant-3', 'Escorts Kubota Ltd',      'EKL Ambient Network', 28.39, 77.29),
-('S3', 'Ghaziabad Campus',  'Santosh Medical College', 'Campus Air Quality',  28.68, 77.44)
-ON CONFLICT (code) DO NOTHING;
+-- Site passwords:
+-- S1: Site#Faridabad1
+-- S2: Site#Faridabad3
+-- S3: Site#Ghaziabad3
+INSERT INTO sites (code, name, client, project, lat, lng, pass_hash) VALUES
+('S1', 'Faridabad Plant-1', 'Escorts Kubota Ltd',      'EKL Ambient Network', 28.41, 77.31, '$2a$12$3gBktSdD6zUs1J7XPpN9CepnYNNksAjMF9xBg8ToPmrBTIjcJA6gS'),
+('S2', 'Faridabad Plant-3', 'Escorts Kubota Ltd',      'EKL Ambient Network', 28.39, 77.29, '$2a$12$yW5I8QfjTospehbnzeptje0ZxIKap2N3s1xOn.eULYIF9TRa0Y192'),
+('S3', 'Ghaziabad Campus',  'Santosh Medical College', 'Campus Air Quality',  28.68, 77.44, '$2a$12$NG4tUX/ZFsmx1b4gB9SlH./i0YezX0Vx0s56RM0kalpQ4cDv.wTJa')
+ON CONFLICT (code) DO UPDATE SET pass_hash = EXCLUDED.pass_hash;
 
 -- 3. Insert Initial Devices
 INSERT INTO devices

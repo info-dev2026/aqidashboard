@@ -236,11 +236,18 @@ tr:hover td{background:#f8faf8}
       <div class="role-tab" data-r="service">Service</div>
       <div class="role-tab on" data-r="client">Client</div>
     </div>
-    <div class="fg"><label id="uL">Client ID</label><input id="u" autocomplete="username" placeholder="e.g. escorts"></div>
+    <div class="fg"><label id="uL">Client ID / Site Code</label><input id="u" autocomplete="username" placeholder="e.g. escorts or S1"></div>
     <div class="fg"><label>Password</label><input id="p" type="password" autocomplete="current-password" placeholder="••••••••"></div>
     <div class="gate-err" id="gateErr"></div>
     <button class="btn btn-primary" id="gateBtn" style="width:100%;justify-content:center">Sign in</button>
-    <div class="gate-hint" id="gateHint" style="text-align:center">© 2026 Saaphzone Technologies LLP.<br>All rights reserved.</div>
+    <div class="gate-hint" id="gateHint" style="text-align:center">
+      <b>Default Accounts:</b><br>
+      • Admin: <code>admin</code> / <code>admin123</code><br>
+      • Client: <code>escorts</code> / <code>escorts123</code><br>
+      • Site S1: <code>S1</code> / <code>Site#Faridabad1</code><br>
+      • Service: <code>service</code> / <code>service123</code><br>
+      <div style="margin-top:4px;font-size:10.5px;opacity:.8">Primary Render URL: aqidashboard-welx.onrender.com</div>
+    </div>
   </div>
 </div>
 
@@ -285,9 +292,9 @@ const DEMO_USERS=[
   {id:4,username:'santosh',password:'santosh123',role:'client',name:'Santosh Medical',client:'Santosh Medical College'}
 ];
 const DEMO_SITES=[
-  {code:'S1',name:'Faridabad Plant-1',client:'Escorts Kubota Ltd',project:'EKL Ambient Network',lat:28.41,lng:77.31},
-  {code:'S2',name:'Faridabad Plant-3',client:'Escorts Kubota Ltd',project:'EKL Ambient Network',lat:28.39,lng:77.29},
-  {code:'S3',name:'Ghaziabad Campus',client:'Santosh Medical College',project:'Campus Air Quality',lat:28.68,lng:77.44}
+  {code:'S1',name:'Faridabad Plant-1',client:'Escorts Kubota Ltd',project:'EKL Ambient Network',lat:28.41,lng:77.31,password:'Site#Faridabad1'},
+  {code:'S2',name:'Faridabad Plant-3',client:'Escorts Kubota Ltd',project:'EKL Ambient Network',lat:28.39,lng:77.29,password:'Site#Faridabad3'},
+  {code:'S3',name:'Ghaziabad Campus',client:'Santosh Medical College',project:'Campus Air Quality',lat:28.68,lng:77.44,password:'Site#Ghaziabad3'}
 ];
 function D(o){return Object.assign({status:'online',dev_type:'maaps',p_inlet:0,p_outlet:0,raining:0,power_manual:null,transmit:1,dp_warn:1200,dp_crit:1500,sp_enabled:0,sp25:60,sp10:100,sp_band:10,power:1,last_seen:new Date().toISOString()},o);}
 let DEMO_DEVICES=[
@@ -328,23 +335,58 @@ function demoEnrich(d){
     site_name:s.name,client:s.client,project:s.project,lat:s.lat,lng:s.lng};
 }
 let DEMO_SESSION=null;
+const API_URLS={
+  primary:'https://aqidashboard-welx.onrender.com',
+  sites:'https://aqidashboard-welx.onrender.com/api/sites'
+};
 const API={
   async call(){throw new Error('offline demo');},
   async get(path){
     if(path==='/me'){if(!DEMO_SESSION)throw new Error('Not authenticated');return DEMO_SESSION;}
-    if(path==='/sites'){const sc=DEMO_SESSION.role==='client'?DEMO_SESSION.client:null;return sc?DEMO_SITES.filter(s=>s.client===sc):DEMO_SITES.slice();}
-    if(path==='/devices'){const sc=DEMO_SESSION.role==='client'?DEMO_SESSION.client:null;
-      return DEMO_DEVICES.filter(d=>{const s=DEMO_SITES.find(x=>x.code===d.site_code);return !sc||(s&&s.client===sc);}).map(demoEnrich);}
+    if(path==='/sites'){
+      if(DEMO_SESSION){
+        if(DEMO_SESSION.site_code)return DEMO_SITES.filter(s=>s.code===DEMO_SESSION.site_code).map(s=>({...s,has_password:!!s.password}));
+        if(DEMO_SESSION.role==='client')return DEMO_SITES.filter(s=>s.client===DEMO_SESSION.client).map(s=>({...s,has_password:!!s.password}));
+      }
+      return DEMO_SITES.map(s=>({...s,has_password:!!s.password}));
+    }
+    if(path==='/devices'){
+      if(DEMO_SESSION&&DEMO_SESSION.site_code)return DEMO_DEVICES.filter(d=>d.site_code===DEMO_SESSION.site_code).map(demoEnrich);
+      const sc=DEMO_SESSION&&DEMO_SESSION.role==='client'?DEMO_SESSION.client:null;
+      return DEMO_DEVICES.filter(d=>{const s=DEMO_SITES.find(x=>x.code===d.site_code);return !sc||(s&&s.client===sc);}).map(demoEnrich);
+    }
     if(path==='/users')return DEMO_USERS.map(u=>({id:u.id,username:u.username,role:u.role,name:u.name,client:u.client,active:1}));
     if(path.match(/\/devices\/.+\/key/)){const id=decodeURIComponent(path.split('/')[2]);return{device_id:id,api_key:'demo_key_'+id};}
     if(path.match(/\/devices\/.+\/history/))return [];
     throw new Error('offline demo');
   },
   async post(path,body){
-    if(path==='/login'){const u=DEMO_USERS.find(x=>x.username===(body.username||'').trim()&&x.password===body.password&&(!body.role||x.role===body.role));
-      if(!u)throw new Error('Invalid credentials');DEMO_SESSION={username:u.username,role:u.role,name:u.name,client:u.client};return{user:DEMO_SESSION};}
+    if(path==='/login'){
+      const un=(body.username||'').trim();
+      const u=DEMO_USERS.find(x=>x.username===un&&x.password===body.password&&(!body.role||x.role===body.role));
+      if(u){DEMO_SESSION={username:u.username,role:u.role,name:u.name,client:u.client,site_code:null};return{user:DEMO_SESSION};}
+      // Check site-level password login
+      const site=DEMO_SITES.find(s=>(s.code===un||s.name.toLowerCase()===un.toLowerCase())&&s.password===body.password);
+      if(site&&(!body.role||body.role==='client')){
+        DEMO_SESSION={username:site.code,role:'client',name:site.name,client:site.client,site_code:site.code};
+        return{user:DEMO_SESSION};
+      }
+      throw new Error('Invalid credentials');
+    }
     if(path==='/logout'){DEMO_SESSION=null;return{ok:1};}
-    if(path==='/sites'){const code='S'+Date.now().toString(36).toUpperCase();DEMO_SITES.push({code,name:body.name,client:body.client,project:body.project||'General',lat:+body.lat||null,lng:+body.lng||null});return{code};}
+    if(path==='/sites'){
+      const code=(body.code&&body.code.trim().toUpperCase())||('S'+Date.now().toString(36).toUpperCase());
+      DEMO_SITES.push({code,name:body.name,client:body.client,project:body.project||'General',lat:+body.lat||null,lng:+body.lng||null,password:body.password||null});
+      return{code,has_password:!!body.password};
+    }
+    const sitePw=path.match(/\/sites\/(.+)\/password/);
+    if(sitePw){
+      const code=decodeURIComponent(sitePw[1]);
+      const s=DEMO_SITES.find(x=>x.code===code);
+      if(!s)throw new Error('Site not found');
+      s.password=body.password;
+      return{ok:1};
+    }
     if(path==='/devices'){if(DEMO_DEVICES.some(d=>d.device_id===body.device_id))throw new Error('Device ID already exists');
       DEMO_DEVICES.push(D({device_id:body.device_id,site_code:body.site_code,location:body.location||'',status:'offline',pm25:0,pm10:0,dev_type:body.dev_type==='basic'?'basic':'maaps',dp_warn:+body.dp_warn||1200,dp_crit:+body.dp_crit||1500,sp_enabled:body.sp_enabled?1:0,sp25:+body.sp25||60,sp10:+body.sp10||100,sp_band:10,power:1,last_seen:null}));
       return{device_id:body.device_id,api_key:'demo_key_'+body.device_id};}
@@ -404,7 +446,8 @@ let selRole='client';
 document.querySelectorAll('.role-tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.role-tab').forEach(x=>x.classList.remove('on'));
   t.classList.add('on');selRole=t.dataset.r;
-  $('#uL').textContent=selRole==='client'?'Client ID':'User ID';
+  $('#uL').textContent=selRole==='client'?'Client ID / Site Code':'User ID';
+  $('#u').placeholder=selRole==='client'?'e.g. escorts or S1':(selRole==='admin'?'admin':'service');
 });
 $('#gateBtn').onclick=login;
 $('#p').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
@@ -511,14 +554,30 @@ function renderSites(c){
     STATE.sites.filter(s=>s.project===pr).forEach(s=>{
       const devs=STATE.devices.filter(d=>d.site_code===s.code),on=devs.filter(d=>d.status==='online');
       const sa=computeAQI(avg(on.map(d=>d.pm25)),avg(on.map(d=>d.pm10))),sc=aqiCat(sa);
+      const hasPw = s.has_password || s.password;
       const cardEl=el('div','site-card');
       cardEl.innerHTML=`<div class="site-band" style="background:${sc.color}"></div>
-        <div class="site-body"><h4>${esc(s.name)}</h4><div class="cl">${esc(s.client)}</div>
-        <div class="site-metrics"><div class="m"><div class="mv" style="color:${sc.color}">${sa}</div><div class="ml">AQI</div></div>
-        <div class="m"><div class="mv">${devs.length}</div><div class="ml">Devices</div></div><div class="m"><div class="mv">${on.length}</div><div class="ml">Online</div></div></div>
-        <div class="site-foot"><span>📍 ${s.lat!=null?s.lat:'—'}, ${s.lng!=null?s.lng:'—'}</span>${canEdit?`<button class="btn btn-ghost btn-sm" data-add="${esc(s.code)}">+ Device</button>`:''}</div></div>`;
+        <div class="site-body">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px">
+            <h4>${esc(s.name)}</h4>
+            <span class="chip" style="font-size:10.5px;padding:2px 6px;white-space:nowrap;background:${hasPw?'#e8f5e9':'#fff3e0'};color:${hasPw?'#2e7d32':'#e65100'}">${hasPw?'🔒 Password':'🔓 No Pwd'}</span>
+          </div>
+          <div class="cl">Code: <b>${esc(s.code)}</b> · ${esc(s.client)}</div>
+          <div class="site-metrics"><div class="m"><div class="mv" style="color:${sc.color}">${sa}</div><div class="ml">AQI</div></div>
+          <div class="m"><div class="mv">${devs.length}</div><div class="ml">Devices</div></div><div class="m"><div class="mv">${on.length}</div><div class="ml">Online</div></div></div>
+        </div>
+        <div class="site-foot" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+          <span>📍 ${s.lat!=null?s.lat:'—'}, ${s.lng!=null?s.lng:'—'}</span>
+          <div style="display:flex;gap:4px">
+            ${canEdit?`<button class="btn btn-ghost btn-sm" data-pw="${esc(s.code)}" title="Set or change password manually">🔑 Password</button>`:''}
+            ${canEdit?`<button class="btn btn-ghost btn-sm" data-add="${esc(s.code)}">+ Device</button>`:''}
+          </div>
+        </div>`;
       grid.appendChild(cardEl);
-      if(canEdit)cardEl.querySelector('[data-add]').onclick=e=>{e.stopPropagation();deviceModal(s.code);};
+      if(canEdit){
+        const pb=cardEl.querySelector('[data-pw]');if(pb)pb.onclick=e=>{e.stopPropagation();sitePasswordModal(s);};
+        const ab=cardEl.querySelector('[data-add]');if(ab)ab.onclick=e=>{e.stopPropagation();deviceModal(s.code);};
+      }
       cardEl.onclick=()=>go('devices');
     });
     card.appendChild(grid);
@@ -799,15 +858,32 @@ function openModal(title,bodyHTML,onSave,saveLabel){
 }
 function siteModal(){
   const clients=[...new Set(STATE.sites.map(s=>s.client))];
-  const body=`<div class="fg"><label>Site name</label><input id="mName" placeholder="e.g. Faridabad Plant-2"></div>
+  const body=`<div class="grid2">
+      <div class="fg"><label>Site code (ID)</label><input id="mCode" placeholder="e.g. S4 (auto if blank)"></div>
+      <div class="fg"><label>Site name</label><input id="mName" placeholder="e.g. Faridabad Plant-4"></div>
+    </div>
     <div class="grid2"><div class="fg"><label>Client</label><input id="mClient" list="clist" placeholder="client name"><datalist id="clist">${clients.map(c=>`<option>${esc(c)}</option>`).join('')}</datalist></div>
     <div class="fg"><label>Project</label><input id="mProj" placeholder="e.g. Ambient Network"></div></div>
+    <div class="fg"><label>Manual Site Password (optional, min 6 chars)</label><input id="mPass" type="text" placeholder="Set manual login password for site"></div>
     <div class="grid2"><div class="fg"><label>Latitude</label><input id="mLat" placeholder="28.41"></div><div class="fg"><label>Longitude</label><input id="mLng" placeholder="77.31"></div></div>`;
   openModal('Add Monitoring Site',body,async bg=>{
+    const code=bg.querySelector('#mCode').value.trim();
     const name=bg.querySelector('#mName').value.trim();if(!name){toast('Enter a site name',true);return false;}
-    try{await API.post('/sites',{name,client:bg.querySelector('#mClient').value.trim(),project:bg.querySelector('#mProj').value.trim(),lat:bg.querySelector('#mLat').value,lng:bg.querySelector('#mLng').value});
+    const password=bg.querySelector('#mPass').value.trim();
+    if(password&&password.length<6){toast('Password must be 6+ chars',true);return false;}
+    try{await API.post('/sites',{code:code||undefined,name,client:bg.querySelector('#mClient').value.trim(),project:bg.querySelector('#mProj').value.trim(),password:password||undefined,lat:bg.querySelector('#mLat').value,lng:bg.querySelector('#mLng').value});
       toast('Site added');go('sites');}catch(e){toast(e.message,true);return false;}
   },'Add Site');
+}
+function sitePasswordModal(site){
+  const body=`<p style="color:var(--muted);margin-bottom:12px">Set manual login password for <b>${esc(site.name)}</b> (Code: <code>${esc(site.code)}</code>).</p>
+    <div class="fg"><label>New manual password (min 6 chars)</label><input id="mSiteNewPw" type="text" placeholder="enter password"></div>`;
+  openModal('Site Password — '+esc(site.code),body,async bg=>{
+    const p=bg.querySelector('#mSiteNewPw').value;
+    if(!p||p.length<6){toast('Password must be 6+ characters',true);return false;}
+    try{await API.post('/sites/'+encodeURIComponent(site.code)+'/password',{password:p});
+      site.password=p;site.has_password=true;toast('Password updated for site '+site.code);go('sites');}catch(e){toast(e.message,true);return false;}
+  },'Set Password');
 }
 function deviceModal(presetSite){
   const opts=STATE.sites.map(s=>`<option value="${esc(s.code)}" ${presetSite===s.code?'selected':''}>${esc(s.name)}</option>`).join('');

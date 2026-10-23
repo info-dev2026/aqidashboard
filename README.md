@@ -117,14 +117,26 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## 🔑 Default Seed Credentials
+## 🌐 Production Endpoints
 
-| Role | Username | Default Password | Access Scope |
+- **Primary Dashboard URL:** [https://aqidashboard-welx.onrender.com](https://aqidashboard-welx.onrender.com)
+- **Monitoring Sites Endpoint:** [https://aqidashboard-welx.onrender.com/api/sites](https://aqidashboard-welx.onrender.com/api/sites)
+
+---
+
+## 🔑 Default Seed Credentials & Site Passwords
+
+| Role / Type | Username / Code | Default Password | Access Scope |
 | :--- | :--- | :--- | :--- |
 | **Admin** | `admin` | `Sz9#vK!7mP@26%AdmX` | Full administrative control, user management, audit logs |
 | **Service** | `service` | `Sv8!wL#4qR&26*EngY` | Hardware controls, sites & device registration, telemetry |
 | **Client** | `escorts` | `ChangeMe#Client1` | Scoped read-only access to Escorts Kubota Ltd |
 | **Client** | `santosh` | `ChangeMe#Client1` | Scoped read-only access to Santosh Medical College |
+| **Site S1** | `S1` | `Site#Faridabad1` | Direct site login: Faridabad Plant-1 |
+| **Site S2** | `S2` | `Site#Faridabad3` | Direct site login: Faridabad Plant-3 |
+| **Site S3** | `S3` | `Site#Ghaziabad3` | Direct site login: Ghaziabad Campus |
+
+> **Manual Site Passwords:** Administrators and Service engineers can manually create or reset passwords for each site via the **Projects &amp; Sites** panel (`🔑 Password` button on each site card) or during site creation. Site users can log in directly using the Site Code and site password under the **Client** login tab.
 
 ---
 

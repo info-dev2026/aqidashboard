@@ -8,7 +8,14 @@ const { Pool } = require('pg');
 require('dotenv').config();
 
 const poolConfig = process.env.DATABASE_URL
-  ? { connectionString: process.env.DATABASE_URL }
+  ? {
+      connectionString: process.env.DATABASE_URL,
+      ssl:
+        process.env.DATABASE_URL.includes('render.com') ||
+        process.env.NODE_ENV === 'production'
+          ? { rejectUnauthorized: false }
+          : false
+    }
   : {
       user: process.env.PGUSER || 'postgres',
       password: process.env.PGPASSWORD || '',
@@ -25,6 +32,15 @@ const pool = new Pool(poolConfig);
 pool.on('error', (err) => {
   console.error('Unexpected error on idle PostgreSQL client:', err);
 });
+
+// Auto-migrate sites table to ensure pass_hash exists
+(async () => {
+  try {
+    await pool.query('ALTER TABLE sites ADD COLUMN IF NOT EXISTS pass_hash TEXT');
+  } catch (err) {
+    // Table may not exist yet during initial boot/seed
+  }
+})();
 
 async function query(text, params) {
   return pool.query(text, params);

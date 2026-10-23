@@ -159,6 +159,47 @@ function cookieOf(res) {
     chk('CSP header present', !!r.headers['content-security-policy']);
     chk('no x-powered-by header', !r.headers['x-powered-by']);
 
+    // 15. Public /api/sites works without authentication and doesn't leak pass_hash
+    r = await request(app).get('/api/sites');
+    chk('public /api/sites 200 without auth', r.status === 200 && Array.isArray(r.body) && r.body.length >= 3);
+    chk('public /api/sites does not leak pass_hash', !r.body.some((s) => s.pass_hash));
+
+    // 16. Admin creates site with manual password
+    const testSiteCode = 'TEST_SITE_1';
+    await query('DELETE FROM sites WHERE code = $1', [testSiteCode]);
+    r = await request(app).post('/api/sites').set('Cookie', adminCk).send({
+      code: testSiteCode,
+      name: 'Test Industrial Site',
+      client: 'Test Industries Ltd',
+      project: 'Testing Network',
+      password: 'Site#TestPassword2026',
+      lat: 28.5,
+      lng: 77.2
+    });
+    chk('admin creates site with manual password (201)', r.status === 201 && r.body.has_password === true);
+
+    // 17. Update site password via /api/sites/:code/password
+    r = await request(app).post(`/api/sites/${testSiteCode}/password`).set('Cookie', adminCk).send({
+      password: 'Site#UpdatedPassword2026'
+    });
+    chk('admin updates site password (200)', r.status === 200 && r.body.ok === true);
+
+    // 18. Login with site code + manual password
+    r = await request(app).post('/api/login').send({
+      username: testSiteCode,
+      password: 'Site#UpdatedPassword2026',
+      role: 'client'
+    });
+    chk('site login with manual password (200)', r.status === 200 && r.body.user.site_code === testSiteCode);
+    const siteCk = cookieOf(r);
+
+    // 19. Scoped site user sees only their site
+    r = await request(app).get('/api/sites').set('Cookie', siteCk);
+    chk('site user sees only their own site', r.status === 200 && r.body.length === 1 && r.body[0].code === testSiteCode);
+
+    // Clean up test site
+    await query('DELETE FROM sites WHERE code = $1', [testSiteCode]);
+
     console.log(`\nResults: ${pass} passed, ${fail} failed`);
   } catch (err) {
     console.error('Test execution error:', err);

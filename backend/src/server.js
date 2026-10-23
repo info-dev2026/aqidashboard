@@ -25,7 +25,7 @@ app.set('trust proxy', 1);
 /* ---------------- CORS Configuration ---------------- */
 const allowedOrigins = (
   process.env.CORS_ORIGIN ||
-  'http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173'
+  'https://aqidashboard-welx.onrender.com,http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173'
 )
   .split(',')
   .map((s) => s.trim());
@@ -176,30 +176,74 @@ app.post('/api/login', loginLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Username and password required' });
   }
 
+  const cleanUser = username.trim();
+
   try {
+    // 1. First check users table
     const userResult = await query(
       'SELECT * FROM users WHERE username = $1 AND active = 1',
-      [username.trim()]
+      [cleanUser]
     );
     const u = userResult.rows[0];
 
-    // Constant-ish failure path to mitigate timing attacks
-    const ok = u
-      ? A.verify(password, u.pass_hash)
-      : A.verify(password, '$2a$12$......................................');
+    if (u) {
+      const ok = A.verify(password, u.pass_hash);
+      if (!ok || (role && u.role !== role)) {
+        await audit(cleanUser, 'login_fail', `role=${role}`, ip(req));
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
 
-    if (!u || !ok || (role && u.role !== role)) {
-      await audit(username, 'login_fail', `role=${role}`, ip(req));
-      return res.status(401).json({ error: 'Invalid credentials' });
+      const token = A.sign(u);
+      res.cookie('szsession', token, cookieOpts);
+      await audit(u.username, 'login_ok', `role=${u.role}`, ip(req));
+      return res.json({
+        token,
+        user: { username: u.username, role: u.role, name: u.name, client: u.client, site_code: null }
+      });
     }
 
-    const token = A.sign(u);
-    res.cookie('szsession', token, cookieOpts);
-    await audit(u.username, 'login_ok', `role=${u.role}`, ip(req));
-    res.json({
-      token,
-      user: { username: u.username, role: u.role, name: u.name, client: u.client }
-    });
+    // 2. If not found in users, check if authenticating directly as a site (by site code or name)
+    const siteResult = await query(
+      'SELECT * FROM sites WHERE (code = $1 OR LOWER(name) = LOWER($1)) AND pass_hash IS NOT NULL',
+      [cleanUser]
+    );
+    const site = siteResult.rows[0];
+
+    if (site) {
+      const siteOk = A.verify(password, site.pass_hash);
+      if (!siteOk || (role && role !== 'client')) {
+        await audit(cleanUser, 'site_login_fail', `site=${site.code}`, ip(req));
+        return res.status(401).json({ error: 'Invalid site credentials' });
+      }
+
+      const siteUser = {
+        code: site.code,
+        username: site.code,
+        name: site.name,
+        role: 'client',
+        client: site.client,
+        site_code: site.code
+      };
+
+      const token = A.sign(siteUser);
+      res.cookie('szsession', token, cookieOpts);
+      await audit(site.code, 'site_login_ok', `site=${site.name}`, ip(req));
+      return res.json({
+        token,
+        user: {
+          username: site.code,
+          role: 'client',
+          name: site.name,
+          client: site.client,
+          site_code: site.code
+        }
+      });
+    }
+
+    // Dummy compare to mitigate timing attack
+    A.verify(password, '$2a$12$......................................');
+    await audit(cleanUser, 'login_fail', `not_found`, ip(req));
+    return res.status(401).json({ error: 'Invalid credentials' });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Authentication service error' });
@@ -213,17 +257,37 @@ app.post('/api/logout', A.authRequired, async (req, res) => {
 });
 
 app.get('/api/me', A.authRequired, (req, res) => {
-  res.json({ username: req.user.u, role: req.user.role, name: req.user.u, client: req.user.client });
+  res.json({
+    username: req.user.u,
+    role: req.user.role,
+    name: req.user.name || req.user.u,
+    client: req.user.client,
+    site_code: req.user.site_code || null
+  });
 });
 
 /* ================= SITES ================= */
-app.get('/api/sites', A.authRequired, async (req, res) => {
+// Supports both public queries and authenticated scoping
+app.get('/api/sites', A.authOptional, async (req, res) => {
   try {
-    const scope = A.scopeClient(req);
-    const sql = scope
-      ? 'SELECT * FROM sites WHERE client = $1 ORDER BY project, name'
-      : 'SELECT * FROM sites ORDER BY project, name';
-    const params = scope ? [scope] : [];
+    const siteScope = A.scopeSite(req);
+    const clientScope = A.scopeClient(req);
+
+    let sql = `SELECT id, code, name, client, project, lat, lng, created_at,
+                      (pass_hash IS NOT NULL) AS has_password
+               FROM sites`;
+    let params = [];
+
+    if (siteScope) {
+      sql += ' WHERE code = $1 ORDER BY project, name';
+      params = [siteScope];
+    } else if (clientScope) {
+      sql += ' WHERE client = $1 ORDER BY project, name';
+      params = [clientScope];
+    } else {
+      sql += ' ORDER BY project, name';
+    }
+
     const result = await query(sql, params);
     res.json(result.rows);
   } catch (err) {
@@ -233,36 +297,95 @@ app.get('/api/sites', A.authRequired, async (req, res) => {
 });
 
 app.post('/api/sites', A.authRequired, A.requireRole('admin', 'service'), async (req, res) => {
-  const { name, client, project, lat, lng } = req.body || {};
+  const { code: rawCode, name, client, project, lat, lng, password } = req.body || {};
   if (!name || !client) {
     return res.status(400).json({ error: 'Site name and client required' });
   }
 
-  const code = 'S' + Date.now().toString(36).toUpperCase();
+  let code = (rawCode && String(rawCode).trim().toUpperCase()) || ('S' + Date.now().toString(36).toUpperCase());
+  // Validate site code
+  if (!/^[A-Z0-9_-]{2,32}$/i.test(code)) {
+    return res.status(400).json({ error: 'Site code must be 2-32 alphanumeric characters' });
+  }
+
+  let passHash = null;
+  if (password) {
+    if (typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({ error: 'Site password must be at least 6 characters' });
+    }
+    passHash = A.hash(password);
+  }
+
   try {
+    const exists = await query('SELECT 1 FROM sites WHERE code = $1', [code]);
+    if (exists.rows.length > 0) {
+      return res.status(409).json({ error: `Site code "${code}" already exists` });
+    }
+
     await query(
-      'INSERT INTO sites (code, name, client, project, lat, lng) VALUES ($1, $2, $3, $4, $5, $6)',
-      [code, name, client, project || 'General', num(lat), num(lng)]
+      'INSERT INTO sites (code, name, client, project, lat, lng, pass_hash) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [code, name, client, project || 'General', num(lat), num(lng), passHash]
     );
-    await audit(req.user.u, 'site_add', code, ip(req));
-    res.status(201).json({ code });
+    await audit(req.user.u, 'site_add', `${code} (pwd=${!!passHash})`, ip(req));
+    res.status(201).json({ code, name, has_password: !!passHash });
   } catch (err) {
     console.error('Create site error:', err);
     res.status(500).json({ error: 'Failed to create site' });
   }
 });
 
+/* Update or Set Site Password Manually */
+app.post('/api/sites/:code/password', A.authRequired, async (req, res) => {
+  const { code } = req.params;
+  const { password } = req.body || {};
+
+  // Admin and Service can change any site's password; a site user can only change their own site's password
+  if (req.user.role === 'client' && req.user.site_code !== code) {
+    return res.status(403).json({ error: 'Insufficient permissions to update this site password' });
+  }
+
+  if (typeof password !== 'string' || password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
+  try {
+    const siteRes = await query('SELECT code, name FROM sites WHERE code = $1', [code]);
+    if (siteRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Site not found' });
+    }
+
+    const passHash = A.hash(password);
+    await query('UPDATE sites SET pass_hash = $1 WHERE code = $2', [passHash, code]);
+    await audit(req.user.u, 'site_password_update', code, ip(req));
+    res.json({ ok: true, message: `Password updated for site ${code}` });
+  } catch (err) {
+    console.error('Update site password error:', err);
+    res.status(500).json({ error: 'Failed to update site password' });
+  }
+});
+
 /* ================= DEVICES ================= */
 app.get('/api/devices', A.authRequired, async (req, res) => {
   try {
-    const scope = A.scopeClient(req);
+    const siteScope = A.scopeSite(req);
+    const clientScope = A.scopeClient(req);
     const sql = `SELECT d.device_id, d.site_code, d.location, d.status, d.pm25, d.pm10, d.last_seen, d.installed, d.last_cal,
                         d.dev_type, d.power, d.power_manual, d.transmit, d.p_inlet, d.p_outlet, d.dp_warn, d.dp_crit, d.raining,
                         d.sp_enabled, d.sp25, d.sp10, d.sp_band,
                         s.name AS site_name, s.client, s.project, s.lat, s.lng
                  FROM devices d JOIN sites s ON s.code = d.site_code`;
-    const finalSql = scope ? `${sql} WHERE s.client = $1 ORDER BY d.device_id` : `${sql} ORDER BY d.device_id`;
-    const params = scope ? [scope] : [];
+    
+    let finalSql = `${sql} ORDER BY d.device_id`;
+    let params = [];
+
+    if (siteScope) {
+      finalSql = `${sql} WHERE d.site_code = $1 ORDER BY d.device_id`;
+      params = [siteScope];
+    } else if (clientScope) {
+      finalSql = `${sql} WHERE s.client = $1 ORDER BY d.device_id`;
+      params = [clientScope];
+    }
+
     const result = await query(finalSql, params);
     res.json(result.rows.map(enrichDevice));
   } catch (err) {
@@ -684,8 +807,25 @@ app.post('/api/sweep', A.authRequired, A.requireRole('admin', 'service'), async 
   }
 });
 
+/* Serve Frontend Static SPA (if running in unified/production mode) */
+const frontendDir = path.resolve(__dirname, '..', '..', 'frontend');
+const fs = require('fs');
+if (fs.existsSync(frontendDir)) {
+  app.use(express.static(frontendDir));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    res.sendFile(path.join(frontendDir, 'index.html'));
+  });
+}
+
 /* 404 + Error Handlers */
-app.use((req, res) => res.status(404).json({ error: 'Not found' }));
+app.use('/api', (req, res) => res.status(404).json({ error: 'API endpoint not found' }));
+app.use((req, res) => {
+  if (fs.existsSync(frontendDir)) {
+    return res.sendFile(path.join(frontendDir, 'index.html'));
+  }
+  res.status(404).json({ error: 'Not found' });
+});
 app.use((err, req, res, next) => {
   if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Payload too large' });
   if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Malformed JSON' });

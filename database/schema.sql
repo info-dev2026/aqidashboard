@@ -32,6 +32,7 @@ CREATE TABLE sites (
     project VARCHAR(128) NOT NULL,
     lat DOUBLE PRECISION,
     lng DOUBLE PRECISION,
+    pass_hash TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

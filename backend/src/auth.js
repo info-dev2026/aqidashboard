@@ -20,7 +20,14 @@ const newApiKey = () => 'maaps_' + crypto.randomBytes(24).toString('hex');
 
 function sign(user) {
   return jwt.sign(
-    { uid: user.id, u: user.username, role: user.role, client: user.client || null },
+    {
+      uid: user.id || ('site_' + user.code),
+      u: user.username || user.code,
+      role: user.role || 'client',
+      client: user.client || null,
+      site_code: user.site_code || user.code || null,
+      name: user.name || user.username || user.code
+    },
     JWT_SECRET,
     { expiresIn: TOKEN_TTL, issuer: 'saaphzone-aqi' }
   );
@@ -39,6 +46,19 @@ function authRequired(req, res, next) {
   }
 }
 
+// Optional authentication: attaches user if token is valid, proceeds without error if absent
+function authOptional(req, res, next) {
+  const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  const token = req.cookies?.szsession || bearer;
+  if (!token) return next();
+  try {
+    req.user = jwt.verify(token, JWT_SECRET, { issuer: 'saaphzone-aqi' });
+  } catch {
+    // Ignore invalid optional token
+  }
+  next();
+}
+
 // Restrict a route to specific roles.
 function requireRole(...roles) {
   return (req, res, next) => {
@@ -51,7 +71,12 @@ function requireRole(...roles) {
 
 // Server-side scope: clients may only touch their own client rows.
 function scopeClient(req) {
-  return req.user.role === 'client' ? req.user.client : null;
+  return req.user?.role === 'client' ? req.user.client : null;
+}
+
+// Server-side scope: site-authenticated users only touch their own site rows.
+function scopeSite(req) {
+  return req.user?.role === 'client' ? req.user.site_code : null;
 }
 
 module.exports = {
@@ -59,8 +84,10 @@ module.exports = {
   verify,
   sign,
   authRequired,
+  authOptional,
   requireRole,
   scopeClient,
+  scopeSite,
   newApiKey,
   JWT_SECRET
 };
