@@ -77,7 +77,8 @@ document.querySelectorAll('.role-tab').forEach((t) => {
     document.querySelectorAll('.role-tab').forEach((x) => x.classList.remove('on'));
     t.classList.add('on');
     selRole = t.dataset.r;
-    $('#uL').textContent = selRole === 'client' ? 'Client ID' : 'User ID';
+    $('#uL').textContent = selRole === 'client' ? 'Client ID / Site Code' : 'User ID';
+    $('#u').placeholder = selRole === 'client' ? 'e.g. escorts or S1' : (selRole === 'admin' ? 'admin' : 'service');
   };
 });
 
@@ -394,30 +395,49 @@ function renderSites(c) {
         const on = devs.filter((d) => d.status === 'online');
         const sa = on.length ? computeAQI(avg(on.map((d) => d.pm25)), avg(on.map((d) => d.pm10))) : 0;
         const sc = on.length ? aqiCat(sa) : { name: 'Offline', color: '#888888' };
+        const hasPw = s.has_password || s.pass_hash;
 
         const cardEl = el('div', 'site-card');
         cardEl.innerHTML = `
           <div class="site-band" style="background:${sc.color}"></div>
           <div class="site-body">
-            <h4>${esc(s.name)}</h4>
-            <div class="cl">${esc(s.client)}</div>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+              <h4>${esc(s.name)}</h4>
+              <span class="chip" style="font-size:11px;padding:2px 7px;white-space:nowrap;background:${hasPw ? '#e8f5e9' : '#fff3e0'};color:${hasPw ? '#2e7d32' : '#e65100'}">
+                ${hasPw ? '🔒 Password' : '🔓 No Pwd'}
+              </span>
+            </div>
+            <div class="cl">Code: <b>${esc(s.code)}</b> · ${esc(s.client)}</div>
             <div class="site-metrics">
               <div class="m"><div class="mv" style="color:${sc.color}">${on.length ? sa : '—'}</div><div class="ml">AQI</div></div>
               <div class="m"><div class="mv">${devs.length}</div><div class="ml">Devices</div></div>
               <div class="m"><div class="mv">${on.length}</div><div class="ml">Online</div></div>
             </div>
           </div>
-          <div class="site-foot">
+          <div class="site-foot" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
             <span>📍 ${s.lat != null ? s.lat : '—'}, ${s.lng != null ? s.lng : '—'}</span>
-            ${canEdit ? `<button class="btn btn-ghost btn-sm" data-add="${esc(s.code)}">+ Device</button>` : ''}
+            <div style="display:flex;gap:6px">
+              ${canEdit ? `<button class="btn btn-ghost btn-sm" data-pw="${esc(s.code)}" title="Set/Change manual password">🔑 Password</button>` : ''}
+              ${canEdit ? `<button class="btn btn-ghost btn-sm" data-add="${esc(s.code)}">+ Device</button>` : ''}
+            </div>
           </div>
         `;
         grid.appendChild(cardEl);
         if (canEdit) {
-          cardEl.querySelector('[data-add]').onclick = (e) => {
-            e.stopPropagation();
-            deviceModal(s.code);
-          };
+          const pwBtn = cardEl.querySelector('[data-pw]');
+          if (pwBtn) {
+            pwBtn.onclick = (e) => {
+              e.stopPropagation();
+              sitePasswordModal(s);
+            };
+          }
+          const addBtn = cardEl.querySelector('[data-add]');
+          if (addBtn) {
+            addBtn.onclick = (e) => {
+              e.stopPropagation();
+              deviceModal(s.code);
+            };
+          }
         }
         cardEl.onclick = () => go('devices');
       });
@@ -982,18 +1002,30 @@ async function renderAudit(c) {
 /* ===== MODAL BUILDERS ===== */
 function siteModal() {
   const body = `
-    <div class="fg"><label>Site Name</label><input id="mSname" placeholder="e.g. Plant-4 Boundary"></div>
-    <div class="fg"><label>Client Organisation</label><input id="mSclient" placeholder="e.g. Escorts Kubota Ltd"></div>
-    <div class="fg"><label>Project Name</label><input id="mSproject" placeholder="e.g. Ambient Air Network"></div>
+    <div class="grid2">
+      <div class="fg"><label>Site Code (ID)</label><input id="mScode" placeholder="e.g. S4 (auto if blank)"></div>
+      <div class="fg"><label>Site Name</label><input id="mSname" placeholder="e.g. Plant-4 Assembly"></div>
+    </div>
+    <div class="grid2">
+      <div class="fg"><label>Client Organisation</label><input id="mSclient" placeholder="e.g. Escorts Kubota Ltd"></div>
+      <div class="fg"><label>Project Name</label><input id="mSproject" placeholder="e.g. Ambient Air Network"></div>
+    </div>
+    <div class="fg">
+      <label>Manual Site Password (Optional, min 6 characters)</label>
+      <input id="mSpassword" type="text" placeholder="Set manual login password for site">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Allows direct site-level login using this Site Code and password.</div>
+    </div>
     <div class="grid2">
       <div class="fg"><label>Latitude</label><input id="mSlat" placeholder="e.g. 28.41"></div>
       <div class="fg"><label>Longitude</label><input id="mSlng" placeholder="e.g. 77.31"></div>
     </div>
   `;
   openModal('Add Monitoring Site', body, async (bg) => {
+    const code = bg.querySelector('#mScode').value.trim();
     const name = bg.querySelector('#mSname').value.trim();
     const client = bg.querySelector('#mSclient').value.trim();
     const project = bg.querySelector('#mSproject').value.trim();
+    const password = bg.querySelector('#mSpassword').value.trim();
     const lat = bg.querySelector('#mSlat').value.trim();
     const lng = bg.querySelector('#mSlng').value.trim();
 
@@ -1001,8 +1033,12 @@ function siteModal() {
       toast('Site name and client are required', true);
       return false;
     }
+    if (password && password.length < 6) {
+      toast('Site password must be at least 6 characters', true);
+      return false;
+    }
     try {
-      await API.post('/sites', { name, client, project, lat, lng });
+      await API.post('/sites', { code: code || undefined, name, client, project, lat, lng, password: password || undefined });
       toast('Site created');
       go('sites');
     } catch (err) {
@@ -1010,6 +1046,33 @@ function siteModal() {
       return false;
     }
   }, 'Create Site');
+}
+
+function sitePasswordModal(site) {
+  const body = `
+    <p style="color:var(--muted);margin-bottom:14px">Set or change the manual login password for <b>${esc(site.name)}</b> (Code: <code>${esc(site.code)}</code>).</p>
+    <div class="fg">
+      <label>Manual Site Password (min 6 characters)</label>
+      <input id="mSitePw" type="text" placeholder="Enter manual site password">
+      <div style="font-size:11.5px;color:var(--muted);margin-top:4px">Users can sign in under Client tab using Site ID <b>${esc(site.code)}</b> and this password.</div>
+    </div>
+  `;
+  openModal('Site Password — ' + esc(site.code), body, async (bg) => {
+    const password = bg.querySelector('#mSitePw').value;
+    if (!password || password.length < 6) {
+      toast('Password must be at least 6 characters', true);
+      return false;
+    }
+    try {
+      await API.post('/sites/' + encodeURIComponent(site.code) + '/password', { password });
+      toast('Password updated for site ' + site.code);
+      site.has_password = true;
+      go('sites');
+    } catch (err) {
+      toast(err.message, true);
+      return false;
+    }
+  }, 'Set Site Password');
 }
 
 function deviceModal(defaultSiteCode) {
