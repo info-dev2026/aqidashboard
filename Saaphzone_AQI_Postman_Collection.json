@@ -368,7 +368,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"device_id\": \"MAAPS-0012\",\n  \"pm25\": 32.4,\n  \"pm10\": 68.2,\n  \"p_inlet\": 960,\n  \"p_outlet\": 350,\n  \"raining\": 0,\n  \"transmit\": 1\n}"
+              "raw": "{\n  \"device_id\": \"MAAPS-0012\",\n  \"api_key\": \"{{deviceApiKey}}\",\n  \"pm25\": 32.4,\n  \"pm10\": 68.2,\n  \"p_inlet\": 960,\n  \"p_outlet\": 350,\n  \"raining\": 0,\n  \"transmit\": 1\n}"
             },
             "url": {
               "raw": "{{baseUrl}}/ingest",
