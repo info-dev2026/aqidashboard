@@ -71,6 +71,7 @@ app.use(
 );
 
 app.use(express.json({ limit: '64kb' }));
+app.use(express.urlencoded({ extended: true, limit: '64kb' }));
 app.use(cookieParser());
 
 // Force HTTPS in production
@@ -390,11 +391,50 @@ app.delete('/api/devices/:id', A.authRequired, A.requireRole('admin', 'service')
 
 /* ============ DEVICE INGESTION ============ */
 app.post('/api/ingest', ingestLimiter, async (req, res) => {
-  const key = req.headers['x-device-key'];
-  const { device_id, pm25, pm10, p_inlet, p_outlet, raining, transmit } = req.body || {};
+  // Support key in headers (X-Device-Key or Authorization Bearer), in body (api_key or key), or query param
+  const key =
+    req.headers['x-device-key'] ||
+    req.headers['x_device_key'] ||
+    (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '') ||
+    req.body?.api_key ||
+    req.body?.key ||
+    req.body?.device_key ||
+    req.body?.['x-device-key'] ||
+    req.query?.api_key ||
+    req.query?.key ||
+    req.query?.device_key;
+
+  // Support device_id in body or query param
+  const device_id =
+    req.body?.device_id ||
+    req.body?.deviceId ||
+    req.body?.id ||
+    req.query?.device_id ||
+    req.query?.deviceId ||
+    req.query?.id;
+
+  const pm25 = req.body?.pm25 ?? req.query?.pm25;
+  const pm10 = req.body?.pm10 ?? req.query?.pm10;
+  const p_inlet = req.body?.p_inlet ?? req.body?.pInlet ?? req.query?.p_inlet;
+  const p_outlet = req.body?.p_outlet ?? req.body?.pOutlet ?? req.query?.p_outlet;
+  const raining = req.body?.raining ?? req.query?.raining;
+  const transmit = req.body?.transmit ?? req.query?.transmit;
 
   if (!key || !device_id) {
-    return res.status(400).json({ error: 'device_id and X-Device-Key required' });
+    return res.status(400).json({
+      error: 'device_id and X-Device-Key required',
+      diagnostics: {
+        device_id_received: device_id || null,
+        has_device_key: !!key,
+        content_type_header: req.headers['content-type'] || 'not set',
+        body_keys_received: req.body ? Object.keys(req.body) : []
+      },
+      instructions: {
+        option_1_headers: 'Add header "X-Device-Key" with value of device API key',
+        option_2_body: 'Or include "api_key" directly inside JSON body',
+        body_format: 'Ensure Postman Body is set to "raw" -> "JSON" with {"device_id": "MAAPS-0012", "pm25": 45, "pm10": 85}'
+      }
+    });
   }
 
   try {
