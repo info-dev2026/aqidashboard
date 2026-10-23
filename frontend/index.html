@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<!--
+  Saaphzone AQI Monitoring Portal — MAAPS Ambient Air Network
+  Frontend Client Application
+  © 2026 Saaphzone Technologies LLP. All rights reserved.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Saaphzone AQI Monitor — MAAPS Network</title>
+  <meta name="description" content="Saaphzone MAAPS ambient air monitoring network portal. Monitor PM2.5, PM10, AQI and device telemetry in real-time.">
+  
+  <!-- Chart.js & Leaflet Map Libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+  <!-- Modular CSS Stylesheet -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ================= AUTH LOGIN SCREEN ================= -->
+  <div id="gate">
+    <div class="gate-card">
+      <div class="gate-logo">
+        <div class="gate-mark">S</div>
+        <div>
+          <div class="brand" style="font-size:20px"><span class="s">Saaph</span><span class="z">zone</span></div>
+          <div style="font-size:11px;color:var(--muted);letter-spacing:.04em">MAAPS Ambient Air Network</div>
+        </div>
+      </div>
+      <h1>Sign in to Portal</h1>
+      <div class="sub">Choose your access role to continue</div>
+
+      <div class="role-tabs">
+        <div class="role-tab on" data-r="client">Client</div>
+        <div class="role-tab" data-r="service">Service</div>
+        <div class="role-tab" data-r="admin">Admin</div>
+      </div>
+
+      <div class="fg">
+        <label id="uL">Client ID</label>
+        <input id="u" autocomplete="username" placeholder="e.g. escorts" autofocus>
+      </div>
+      <div class="fg">
+        <label>Password</label>
+        <input id="p" type="password" autocomplete="current-password" placeholder="••••••••">
+      </div>
+
+      <div class="gate-err" id="gateErr"></div>
+      <button class="btn btn-primary" id="gateBtn" style="width:100%;justify-content:center">Sign in</button>
+
+      <div class="gate-hint" id="gateHint">
+        <b>Default Accounts:</b><br>
+        • Admin: <code>admin</code> / <code>Sz9#vK!7mP@26%AdmX</code><br>
+        • Service: <code>service</code> / <code>Sv8!wL#4qR&amp;26*EngY</code><br>
+        • Client: <code>escorts</code> / <code>ChangeMe#Client1</code><br>
+        <div style="margin-top:4px;font-size:11px;opacity:.8">Connected to PostgreSQL Database</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= APP DASHBOARD SHELL ================= -->
+  <div class="app" id="app">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sb-brand">
+        <div class="sb-mark">
+          <div style="font-weight:900;font-size:24px;color:var(--green)">S</div>
+        </div>
+        <div>
+          <div class="bt">Saaphzone</div>
+          <div class="bs">AQI · MAAPS Network</div>
+        </div>
+      </div>
+      <div class="sb-role" id="sbRole"></div>
+      <nav class="sb-nav" id="sbNav"></nav>
+      <div class="sb-foot">
+        <span class="live-dot"></span>Live PostgreSQL Stream<br>
+        Saaphzone Technologies LLP<br>
+        <span style="opacity:.7">www.saaphzone.com</span>
+      </div>
+    </aside>
+
+    <!-- Main View Area -->
+    <div class="main">
+      <div class="topbar">
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="menu-btn" id="menuBtn">☰</button>
+          <div class="tb-title" id="tbTitle">Dashboard</div>
+        </div>
+        <div class="tb-right">
+          <span class="clock" id="clock">--:--:--</span>
+          <span class="tb-badge"><span class="live-dot"></span>Online</span>
+          <button class="btn btn-ghost btn-sm" id="logoutBtn">Sign out</button>
+        </div>
+      </div>
+
+      <div class="content" id="content"></div>
+
+      <div style="text-align:center;padding:16px;color:var(--muted);font-size:12px">
+        © 2026 Saaphzone Technologies LLP. All rights reserved. · 3-Tier Architecture (PostgreSQL)
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notifications Container -->
+  <div class="toasts" id="toasts"></div>
+
+  <!-- Modular Application Scripts -->
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/aqi.js"></script>
+  <script src="js/health.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

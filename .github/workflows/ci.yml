@@ -1,0 +1,60 @@
+name: Backend Integration Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: saaphzone_aqi
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install backend dependencies
+        run: npm --prefix backend install
+
+      - name: Initialize PostgreSQL database
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGDATABASE: saaphzone_aqi
+          PGUSER: postgres
+          PGPASSWORD: postgrespassword
+          JWT_SECRET: 4f9c2d18e3a7b5c6f0124987654321fedcba0987654321abcdef0123456789ab
+        run: node database/init.js
+
+      - name: Run test suite
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGDATABASE: saaphzone_aqi
+          PGUSER: postgres
+          PGPASSWORD: postgrespassword
+          JWT_SECRET: 4f9c2d18e3a7b5c6f0124987654321fedcba0987654321abcdef0123456789ab
+        run: npm --prefix backend test

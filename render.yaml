@@ -1,0 +1,41 @@
+services:
+  # 1. Express REST API Backend
+  - type: web
+    name: saaphzone-aqi-backend
+    env: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: DATABASE_URL
+        fromDatabase:
+          name: saaphzone-aqi-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: "*"
+
+  # 2. Frontend Static Client
+  - type: static
+    name: saaphzone-aqi-frontend
+    plan: free
+    rootDir: frontend
+    buildCommand: echo "Frontend static ready"
+    staticPublishPath: .
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+databases:
+  # 3. PostgreSQL Managed Database
+  - name: saaphzone-aqi-db
+    databaseName: saaphzone_aqi
+    user: saaphzone_admin
+    plan: free

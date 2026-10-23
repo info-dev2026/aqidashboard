@@ -1,0 +1,15 @@
+{
+  "name": "saaphzone-aqi-portal-monorepo",
+  "version": "1.0.0",
+  "description": "Saaphzone AQI Monitoring Portal — Decoupled 3-Tier Architecture with PostgreSQL",
+  "private": true,
+  "scripts": {
+    "db:init": "node database/init.js",
+    "db:seed": "node database/seed.js",
+    "backend:start": "npm --prefix backend start",
+    "backend:dev": "npm --prefix backend run dev",
+    "frontend:start": "npm --prefix frontend start",
+    "frontend:dev": "npm --prefix frontend run dev",
+    "test:backend": "npm --prefix backend test"
+  }
+}

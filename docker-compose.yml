@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  database:
+    image: postgres:16-alpine
+    container_name: saaphzone_aqi_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: saaphzone_aqi
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+      - ./database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d saaphzone_aqi"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: saaphzone_aqi_backend
+    restart: always
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      PGHOST: database
+      PGPORT: 5432
+      PGDATABASE: saaphzone_aqi
+      PGUSER: postgres
+      PGPASSWORD: postgrespassword
+      JWT_SECRET: 4f9c2d18e3a7b5c6f0124987654321fedcba0987654321abcdef0123456789ab
+      CORS_ORIGIN: http://localhost:3000,http://127.0.0.1:3000
+    ports:
+      - "5000:5000"
+    depends_on:
+      database:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: saaphzone_aqi_frontend
+    restart: always
+    environment:
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:
+    driver: local

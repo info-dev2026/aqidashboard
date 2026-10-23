@@ -1,0 +1,33 @@
+{
+  "name": "saaphzone-aqi-backend",
+  "version": "1.0.0",
+  "description": "Saaphzone AQI Monitoring Portal — Backend API Service (PostgreSQL)",
+  "author": "Saaphzone Technologies LLP",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node test.js",
+    "db:init": "node ../database/init.js",
+    "db:seed": "node ../database/seed.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "supertest": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
