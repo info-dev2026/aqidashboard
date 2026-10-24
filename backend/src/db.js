@@ -33,12 +33,47 @@ pool.on('error', (err) => {
   console.error('Unexpected error on idle PostgreSQL client:', err);
 });
 
-// Auto-migrate sites table to ensure pass_hash exists
+const fs = require('fs');
+const path = require('path');
+
+// Auto-bootstrap schema and seed if database is uninitialized
 (async () => {
   try {
-    await pool.query('ALTER TABLE sites ADD COLUMN IF NOT EXISTS pass_hash TEXT');
+    const res = await pool.query(
+      "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users'"
+    );
+    if (res.rows.length === 0) {
+      console.log('PostgreSQL tables missing. Auto-bootstrapping schema and initial seed...');
+      const schemaPaths = [
+        path.resolve(__dirname, '..', '..', 'database', 'schema.sql'),
+        path.resolve(__dirname, '..', 'database', 'schema.sql'),
+        path.resolve(process.cwd(), 'database', 'schema.sql')
+      ];
+      const seedPaths = [
+        path.resolve(__dirname, '..', '..', 'database', 'seed.sql'),
+        path.resolve(__dirname, '..', 'database', 'seed.sql'),
+        path.resolve(process.cwd(), 'database', 'seed.sql')
+      ];
+
+      const schemaFile = schemaPaths.find(p => fs.existsSync(p));
+      const seedFile = seedPaths.find(p => fs.existsSync(p));
+
+      if (schemaFile) {
+        const schemaSql = fs.readFileSync(schemaFile, 'utf8');
+        await pool.query(schemaSql);
+        console.log('Schema applied successfully.');
+      }
+      if (seedFile) {
+        const seedSql = fs.readFileSync(seedFile, 'utf8');
+        await pool.query(seedSql);
+        console.log('Initial seed data applied successfully.');
+      }
+    } else {
+      // Auto-migrate sites table to ensure pass_hash exists if upgrading
+      await pool.query('ALTER TABLE sites ADD COLUMN IF NOT EXISTS pass_hash TEXT');
+    }
   } catch (err) {
-    // Table may not exist yet during initial boot/seed
+    console.warn('Database initialization note:', err.message);
   }
 })();
 

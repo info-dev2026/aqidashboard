@@ -296,11 +296,24 @@ app.get('/api/sites', A.authOptional, async (req, res) => {
   }
 });
 
-app.post('/api/sites', A.authRequired, A.requireRole('admin', 'service'), async (req, res) => {
-  const { code: rawCode, name, client, project, lat, lng, password } = req.body || {};
-  if (!name || !client) {
-    return res.status(400).json({ error: 'Site name and client required' });
-  }
+app.post(
+  '/api/sites',
+  (req, res, next) => {
+    if (req.body && (req.body.pm25 !== undefined || (req.body.device_id && !req.body.name))) {
+      return res.status(400).json({
+        error: 'Telemetry sensor data was sent to /api/sites. Please send device readings to POST /api/ingest instead.',
+        targetEndpoint: '/api/ingest'
+      });
+    }
+    next();
+  },
+  A.authRequired,
+  A.requireRole('admin', 'service'),
+  async (req, res) => {
+    const { code: rawCode, name, client, project, lat, lng, password } = req.body || {};
+    if (!name || !client) {
+      return res.status(400).json({ error: 'Site name and client required' });
+    }
 
   let code = (rawCode && String(rawCode).trim().toUpperCase()) || ('S' + Date.now().toString(36).toUpperCase());
   // Validate site code
