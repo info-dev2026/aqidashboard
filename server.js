@@ -36,6 +36,15 @@ const server = http.createServer((req, res) => {
     return res.end('403 Forbidden');
   }
 
+  // Prevent API requests from falling back to index.html
+  if (reqPath.startsWith('/api/')) {
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({
+      error: 'API endpoint not found on static frontend server. Direct API requests to the backend server.',
+      path: reqPath
+    }));
+  }
+
   fs.stat(filePath, (err, stats) => {
     if (err || !stats.isFile()) {
       // Fallback to index.html for SPA routing
