@@ -7,7 +7,7 @@
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:5000/api",
+      "value": "https://aqidashboard-welx.onrender.com/api",
       "type": "string"
     },
     {
@@ -17,7 +17,7 @@
     },
     {
       "key": "deviceApiKey",
-      "value": "maaps_5ffa73ec19b83a8432c61eddf9c7c1a926a40e6bdd4ad665",
+      "value": "maaps_8a7d1b3e9f0c2a4e6d8b0c2e4a6f8b0d2e4a6c8e0b2d4f6a",
       "type": "string"
     }
   ],
