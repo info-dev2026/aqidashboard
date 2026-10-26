@@ -645,15 +645,33 @@ function deviceDetail(id) {
   body += `</div>`;
 
   if (isMaaps && canEdit) {
+    const isLockedOff = d.power_reason === 'manual' && !d.power_on;
+    const isManualOn = d.power_reason === 'manual' && d.power_on;
+
     body += `
       <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px">
-        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:9px">Controls (Admin / Service)</div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;margin-bottom:9px">Analyzer Power & Logger Remote Control</div>
         <div class="toggle-row">
-          <button class="btn btn-sm ${d.power_reason === 'manual' && d.power_on ? 'btn-primary' : 'btn-ghost'}" data-pw="on">Power ON</button>
-          <button class="btn btn-sm ${d.power_reason === 'manual' && !d.power_on ? 'btn-danger' : 'btn-ghost'}" data-pw="off">Power OFF</button>
-          <button class="btn btn-sm ${d.power_reason !== 'manual' ? 'btn-primary' : 'btn-ghost'}" data-pw="auto">Auto (rain + setpoint)</button>
+          <button class="btn btn-sm ${isManualOn ? 'btn-primary' : 'btn-ghost'}" data-pw="on" title="Start analyzer and clear logger lockout">⚡ Start Analyzer</button>
+          <button class="btn btn-sm ${isLockedOff ? 'btn-danger' : 'btn-ghost'}" data-pw="off" title="Stop analyzer and command logger not to restart">🛑 Stop Analyzer (Lockout)</button>
+          <button class="btn btn-sm ${d.power_reason !== 'manual' ? 'btn-primary' : 'btn-ghost'}" data-pw="auto" title="Auto control based on PM setpoints and rain">🔄 Auto (Rain + Setpoints)</button>
         </div>
-        <div class="toggle-row">
+
+        ${isLockedOff ? `
+          <div style="margin-top:10px;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:12px;">
+            <div style="font-weight:700;color:#991b1b;font-size:12px;display:flex;align-items:center;gap:6px">
+              <span>🛑 ANALYZER LOCKED OUT BY DASHBOARD</span>
+            </div>
+            <div style="font-size:12px;color:#7f1d1d;margin-top:4px;line-height:1.4">
+              <b>Command sent to Logger:</b> "Stop analyzer immediately. Do not restart the analyzer until dashboard starts it."
+            </div>
+            <div style="margin-top:6px;font-size:11px;color:#991b1b;font-family:monospace">
+              restart_allowed: false | lockout: true | action: STOP | instruction: HOLD_OFF
+            </div>
+          </div>
+        ` : ''}
+
+        <div class="toggle-row" style="margin-top:10px">
           <button class="btn btn-sm ${d.transmit ? 'btn-primary' : 'btn-ghost'}" data-tx="1">Transmission ON</button>
           <button class="btn btn-sm ${!d.transmit ? 'btn-danger' : 'btn-ghost'}" data-tx="0">Transmission OFF</button>
           <button class="btn btn-sm btn-ghost" data-rain="toggle">Simulate rain: ${d.raining ? 'Stop' : 'Start'}</button>
@@ -673,13 +691,17 @@ function deviceDetail(id) {
         </div>
         <div class="toggle-row" style="margin-top:12px">
           <button class="btn btn-sm btn-ghost" data-key="${esc(id)}">View API Key</button>
+          <button class="btn btn-sm btn-ghost" data-loggerpayload="${esc(id)}">Inspect Logger Payload</button>
         </div>
       </div>
     `;
   } else if (canEdit) {
     body += `
       <div style="margin-top:18px;border-top:1px solid var(--line);padding-top:14px">
-        <div class="toggle-row"><button class="btn btn-sm btn-ghost" data-key="${esc(id)}">View API Key</button></div>
+        <div class="toggle-row">
+          <button class="btn btn-sm btn-ghost" data-key="${esc(id)}">View API Key</button>
+          <button class="btn btn-sm btn-ghost" data-loggerpayload="${esc(id)}">Inspect Logger Payload</button>
+        </div>
       </div>
     `;
   }
@@ -692,6 +714,12 @@ function deviceDetail(id) {
       showKey(id);
     };
   }
+  const lpb = bg.querySelector('[data-loggerpayload]');
+  if (lpb) {
+    lpb.onclick = () => {
+      showLoggerPayload(id);
+    };
+  }
 
   if (isMaaps && canEdit) {
     const send = async (payload) => {
@@ -699,7 +727,17 @@ function deviceDetail(id) {
         const r = await API.post('/devices/' + encodeURIComponent(id) + '/control', payload);
         const i = STATE.devices.findIndex((x) => x.device_id === id);
         if (i >= 0) STATE.devices[i] = r;
-        toast('Device settings updated');
+
+        if (payload.power === 'off') {
+          toast('Analyzer switched OFF: Stop & lockout payload sent to logger');
+        } else if (payload.power === 'on') {
+          toast('Analyzer switched ON: Start payload sent to logger');
+        } else if (payload.power === 'auto') {
+          toast('Analyzer set to AUTO: Environmental hysteresis active');
+        } else {
+          toast('Device settings updated');
+        }
+
         bg.remove();
         deviceDetail(id);
       } catch (err) {
@@ -738,6 +776,33 @@ async function showKey(id) {
     );
   } catch (err) {
     toast(err.message, true);
+  }
+}
+
+async function showLoggerPayload(id) {
+  try {
+    const r = await API.get('/devices/' + encodeURIComponent(id) + '/command');
+    const payload = r.logger_payload || r;
+    const body = `
+      <p style="color:var(--muted);margin-bottom:12px;font-size:13px;line-height:1.4">
+        This is the real-time command payload dispatched to the data logger for <b>${esc(id)}</b>. When the analyzer is stopped from the dashboard, this payload directs the logger to stop and prohibits restarts until the dashboard restarts it.
+      </p>
+      <div style="background:#0f172a;color:#38bdf8;padding:14px;border-radius:8px;font-family:monospace;font-size:12px;overflow-x:auto;max-height:320px;white-space:pre-wrap;line-height:1.4">${esc(JSON.stringify(payload, null, 2))}</div>
+      <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-sm btn-primary" id="btnCopyPayload">Copy Payload JSON</button>
+        <span style="font-size:12px;color:var(--muted)">Endpoint: <code>GET /api/devices/${esc(id)}/command</code></span>
+      </div>
+    `;
+    const bg = openModal('Logger Remote Command Payload — ' + esc(id), body, () => true, 'Close');
+    const cp = bg.querySelector('#btnCopyPayload');
+    if (cp) {
+      cp.onclick = () => {
+        navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+        toast('Logger payload JSON copied to clipboard');
+      };
+    }
+  } catch (err) {
+    toast('Failed to load logger payload: ' + err.message, true);
   }
 }
 

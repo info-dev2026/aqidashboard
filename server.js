@@ -36,13 +36,39 @@ const server = http.createServer((req, res) => {
     return res.end('403 Forbidden');
   }
 
-  // Prevent API requests from falling back to index.html
-  if (reqPath.startsWith('/api/')) {
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({
-      error: 'API endpoint not found on static frontend server. Direct API requests to the backend server.',
-      path: reqPath
-    }));
+  // Proxy API and telemetry ingestion requests to the backend server (port 5000)
+  const isApiRequest = reqPath.startsWith('/api/') ||
+    reqPath === '/api' ||
+    reqPath === '/ingest' ||
+    reqPath === '/data' ||
+    reqPath === '/telemetry' ||
+    reqPath === '/readings';
+
+  if (isApiRequest) {
+    const proxyReq = http.request({
+      hostname: '127.0.0.1',
+      port: 5000,
+      path: req.url,
+      method: req.method,
+      headers: {
+        ...req.headers,
+        host: '127.0.0.1:5000'
+      }
+    }, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode, proxyRes.headers);
+      proxyRes.pipe(res);
+    });
+
+    proxyReq.on('error', (err) => {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: 'Backend API service unreachable at http://127.0.0.1:5000',
+        message: err.message
+      }));
+    });
+
+    req.pipe(proxyReq);
+    return;
   }
 
   fs.stat(filePath, (err, stats) => {

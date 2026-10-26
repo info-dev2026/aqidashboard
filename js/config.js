@@ -23,14 +23,15 @@ window.APP_CONFIG = (function() {
 
   // If frontend is hosted directly on the Render service on the same origin
   const isRenderHost = window.location.origin === PRIMARY_URL;
-  // If running locally with local backend on port 5000
-  const isLocalBackend = window.location.hostname === 'localhost' && window.location.port === '5000';
+  // If running locally on localhost / 127.0.0.1
+  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 
   let defaultApiBase = PRIMARY_API_BASE;
   if (isRenderHost) {
     defaultApiBase = '/api';
-  } else if (isLocalBackend) {
-    defaultApiBase = 'http://localhost:5000/api';
+  } else if (isLocal) {
+    // If accessed via port 5000, use relative /api. If accessed via port 3000, proxy or direct to 5000.
+    defaultApiBase = window.location.port === '5000' ? '/api' : 'http://localhost:5000/api';
   }
 
   return {
