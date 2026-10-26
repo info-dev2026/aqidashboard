@@ -65,5 +65,7 @@ const API = {
 
   get: (path) => API.call('GET', path),
   post: (path, body) => API.call('POST', path, body),
+  put: (path, body) => API.call('PUT', path, body),
+  patch: (path, body) => API.call('PATCH', path, body),
   del: (path) => API.call('DELETE', path)
 };
