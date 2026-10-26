@@ -1,0 +1,12 @@
+{
+  "name": "saaphzone-aqi-frontend",
+  "version": "1.0.0",
+  "description": "Saaphzone AQI Monitoring Portal — Decoupled Frontend Client",
+  "author": "Saaphzone Technologies LLP",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  }
+}

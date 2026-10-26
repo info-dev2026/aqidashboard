@@ -1,0 +1,27 @@
+{
+  "version": 2,
+  "outputDirectory": "public",
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://aqidashboard-welx.onrender.com/api/$1"
+    },
+    {
+      "source": "/ingest",
+      "destination": "https://aqidashboard-welx.onrender.com/api/ingest"
+    },
+    {
+      "source": "/data",
+      "destination": "https://aqidashboard-welx.onrender.com/api/data"
+    },
+    {
+      "source": "/telemetry",
+      "destination": "https://aqidashboard-welx.onrender.com/api/telemetry"
+    },
+    {
+      "source": "/((?!api|css|js|assets|favicon|.*\\..*).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

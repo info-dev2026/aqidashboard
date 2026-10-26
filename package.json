@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "postinstall": "npm --prefix backend install",
-    "build": "npm --prefix backend install",
+    "build": "npm --prefix backend install && node -e \"const fs=require('fs'); fs.cpSync('frontend', 'public', {recursive:true});\"",
     "start": "node backend/src/server.js",
     "start:both": "node start.js",
     "dev": "node start.js --dev",
