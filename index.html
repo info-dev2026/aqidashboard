@@ -358,9 +358,9 @@ const API={
       const u=DEMO_USERS.find(x=>x.username===un&&x.password===body.password&&(!body.role||x.role===body.role));
       if(u){DEMO_SESSION={username:u.username,role:u.role,name:u.name,client:u.client,site_code:null};return{user:DEMO_SESSION};}
       // Check site-level password login
-      const site=DEMO_SITES.find(s=>(s.code===un||s.name.toLowerCase()===un.toLowerCase())&&s.password===body.password);
+      const site=DEMO_SITES.find(s=>((s.username&&s.username.toLowerCase()===un.toLowerCase())||s.code===un||s.name.toLowerCase()===un.toLowerCase())&&s.password===body.password);
       if(site&&(!body.role||body.role==='client')){
-        DEMO_SESSION={username:site.code,role:'client',name:site.name,client:site.client,site_code:site.code};
+        DEMO_SESSION={username:site.username||site.code,role:'client',name:site.name,client:site.client,site_code:site.code};
         return{user:DEMO_SESSION};
       }
       throw new Error('Invalid credentials');
@@ -368,16 +368,19 @@ const API={
     if(path==='/logout'){DEMO_SESSION=null;return{ok:1};}
     if(path==='/sites'){
       const code=(body.code&&body.code.trim().toUpperCase())||('S'+Date.now().toString(36).toUpperCase());
-      DEMO_SITES.push({code,name:body.name,client:body.client,project:body.project||'General',lat:+body.lat||null,lng:+body.lng||null,password:body.password||null});
-      return{code,has_password:!!body.password};
+      const username=body.username||code;
+      DEMO_SITES.push({code,username,name:body.name,client:body.client,project:body.project||'General',lat:+body.lat||null,lng:+body.lng||null,password:body.password||null});
+      return{code,username,has_password:!!body.password};
     }
     const sitePw=path.match(/\/sites\/(.+)\/password/);
     if(sitePw){
       const code=decodeURIComponent(sitePw[1]);
       const s=DEMO_SITES.find(x=>x.code===code);
       if(!s)throw new Error('Site not found');
-      s.password=body.password;
-      return{ok:1};
+      if(body.username)s.username=body.username;
+      if(body.remove_password)s.password=null;
+      else if(body.password)s.password=body.password;
+      return{ok:1,username:s.username||s.code,has_password:!!s.password};
     }
     if(path==='/devices'){if(DEMO_DEVICES.some(d=>d.device_id===body.device_id))throw new Error('Device ID already exists');
       DEMO_DEVICES.push(D({device_id:body.device_id,site_code:body.site_code,location:body.location||'',status:'offline',pm25:0,pm10:0,dev_type:body.dev_type==='basic'?'basic':'maaps',dp_warn:+body.dp_warn||1200,dp_crit:+body.dp_crit||1500,sp_enabled:body.sp_enabled?1:0,sp25:+body.sp25||60,sp10:+body.sp10||100,sp_band:10,power:1,last_seen:null}));
@@ -399,6 +402,24 @@ const API={
       DEMO_USERS.push({id:Date.now(),username:body.username,password:body.password,role:body.role,name:body.name||body.username,client:body.role==='client'?body.client:null});return{ok:1};}
     const pw=path.match(/\/users\/(.+)\/password/);
     if(pw){const u=DEMO_USERS.find(x=>String(x.id)===pw[1]);if(u)u.password=body.password;return{ok:1};}
+    throw new Error('offline demo');
+  },
+  async put(path,body){
+    const siteM=path.match(/\/sites\/(.+)/);
+    if(siteM){
+      const code=decodeURIComponent(siteM[1]);
+      const s=DEMO_SITES.find(x=>x.code===code);
+      if(!s)throw new Error('Site not found');
+      if(body.username!==undefined)s.username=body.username;
+      if(body.remove_password)s.password=null;
+      else if(body.password)s.password=body.password;
+      if(body.name)s.name=body.name;
+      if(body.client)s.client=body.client;
+      if(body.project)s.project=body.project;
+      if(body.lat!==undefined)s.lat=+body.lat||null;
+      if(body.lng!==undefined)s.lng=+body.lng||null;
+      return {...s,has_password:!!s.password};
+    }
     throw new Error('offline demo');
   },
   async del(path){
@@ -554,20 +575,20 @@ function renderSites(c){
             <h4>${esc(s.name)}</h4>
             <span class="chip" style="font-size:10.5px;padding:2px 6px;white-space:nowrap;background:${hasPw?'#e8f5e9':'#fff3e0'};color:${hasPw?'#2e7d32':'#e65100'}">${hasPw?'🔒 Password':'🔓 No Pwd'}</span>
           </div>
-          <div class="cl">Code: <b>${esc(s.code)}</b> · ${esc(s.client)}</div>
+          <div class="cl">Code: <b>${esc(s.code)}</b> · User: <b>${esc(s.username || s.code)}</b> · ${esc(s.client)}</div>
           <div class="site-metrics"><div class="m"><div class="mv" style="color:${sc.color}">${sa}</div><div class="ml">AQI</div></div>
           <div class="m"><div class="mv">${devs.length}</div><div class="ml">Devices</div></div><div class="m"><div class="mv">${on.length}</div><div class="ml">Online</div></div></div>
         </div>
         <div class="site-foot" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
           <span>📍 ${s.lat!=null?s.lat:'—'}, ${s.lng!=null?s.lng:'—'}</span>
           <div style="display:flex;gap:4px">
-            ${canEdit?`<button class="btn btn-ghost btn-sm" data-pw="${esc(s.code)}" title="Set or change password manually">🔑 Password</button>`:''}
+            ${canEdit?`<button class="btn btn-ghost btn-sm" data-edit="${esc(s.code)}" title="Edit station details, username & password">⚙ Edit &amp; Login</button>`:''}
             ${canEdit?`<button class="btn btn-ghost btn-sm" data-add="${esc(s.code)}">+ Device</button>`:''}
           </div>
         </div>`;
       grid.appendChild(cardEl);
       if(canEdit){
-        const pb=cardEl.querySelector('[data-pw]');if(pb)pb.onclick=e=>{e.stopPropagation();sitePasswordModal(s);};
+        const pb=cardEl.querySelector('[data-edit]');if(pb)pb.onclick=e=>{e.stopPropagation();siteEditModal(s);};
         const ab=cardEl.querySelector('[data-add]');if(ab)ab.onclick=e=>{e.stopPropagation();deviceModal(s.code);};
       }
       cardEl.onclick=()=>go('devices');
@@ -851,31 +872,62 @@ function openModal(title,bodyHTML,onSave,saveLabel){
 function siteModal(){
   const clients=[...new Set(STATE.sites.map(s=>s.client))];
   const body=`<div class="grid2">
-      <div class="fg"><label>Site code (ID)</label><input id="mCode" placeholder="e.g. S4 (auto if blank)"></div>
-      <div class="fg"><label>Site name</label><input id="mName" placeholder="e.g. Faridabad Plant-4"></div>
+      <div class="fg"><label>Station Code (ID)</label><input id="mCode" placeholder="e.g. S4 (auto if blank)"></div>
+      <div class="fg"><label>Station Name</label><input id="mName" placeholder="e.g. Faridabad Plant-4"></div>
     </div>
-    <div class="grid2"><div class="fg"><label>Client</label><input id="mClient" list="clist" placeholder="client name"><datalist id="clist">${clients.map(c=>`<option>${esc(c)}</option>`).join('')}</datalist></div>
+    <div class="grid2">
+      <div class="fg"><label>Station Username (Login ID)</label><input id="mUser" placeholder="e.g. plant4_user (default: Station Code)"><div style="font-size:11px;color:var(--muted);margin-top:2px">Used to sign in. Defaults to Station Code if blank.</div></div>
+      <div class="fg"><label>Station Password (optional, min 6 chars)</label><input id="mPass" type="text" placeholder="Set manual login password"><div style="font-size:11px;color:var(--muted);margin-top:2px">Allows direct station login under Client tab.</div></div>
+    </div>
+    <div class="grid2"><div class="fg"><label>Client Organisation</label><input id="mClient" list="clist" placeholder="e.g. Escorts Kubota Ltd"><datalist id="clist">${clients.map(c=>`<option>${esc(c)}</option>`).join('')}</datalist></div>
     <div class="fg"><label>Project</label><input id="mProj" placeholder="e.g. Ambient Network"></div></div>
-    <div class="fg"><label>Manual Site Password (optional, min 6 chars)</label><input id="mPass" type="text" placeholder="Set manual login password for site"></div>
     <div class="grid2"><div class="fg"><label>Latitude</label><input id="mLat" placeholder="28.41"></div><div class="fg"><label>Longitude</label><input id="mLng" placeholder="77.31"></div></div>`;
-  openModal('Add Monitoring Site',body,async bg=>{
+  openModal('Add Monitoring Station',body,async bg=>{
     const code=bg.querySelector('#mCode').value.trim();
-    const name=bg.querySelector('#mName').value.trim();if(!name){toast('Enter a site name',true);return false;}
+    const name=bg.querySelector('#mName').value.trim();if(!name){toast('Enter a station name',true);return false;}
+    const username=bg.querySelector('#mUser').value.trim();
+    const client=bg.querySelector('#mClient').value.trim();if(!client){toast('Enter client organization',true);return false;}
     const password=bg.querySelector('#mPass').value.trim();
     if(password&&password.length<6){toast('Password must be 6+ chars',true);return false;}
-    try{await API.post('/sites',{code:code||undefined,name,client:bg.querySelector('#mClient').value.trim(),project:bg.querySelector('#mProj').value.trim(),password:password||undefined,lat:bg.querySelector('#mLat').value,lng:bg.querySelector('#mLng').value});
-      toast('Site added');go('sites');}catch(e){toast(e.message,true);return false;}
-  },'Add Site');
+    try{
+      await API.post('/sites',{code:code||undefined,username:username||undefined,name,client,project:bg.querySelector('#mProj').value.trim(),password:password||undefined,lat:bg.querySelector('#mLat').value,lng:bg.querySelector('#mLng').value});
+      toast('Station added');go('sites');
+    }catch(e){toast(e.message,true);return false;}
+  },'Add Station');
+}
+function siteEditModal(site){
+  const hasPw=site.has_password||site.password;
+  const body=`<div class="grid2">
+      <div class="fg"><label>Station Code (ID)</label><input id="mEditCode" value="${esc(site.code)}" disabled style="background:var(--bg);cursor:not-allowed"></div>
+      <div class="fg"><label>Station Name</label><input id="mEditName" value="${esc(site.name)}"></div>
+    </div>
+    <div class="grid2">
+      <div class="fg"><label>Station Username (Login ID)</label><input id="mEditUser" value="${esc(site.username||site.code)}" placeholder="e.g. plant_operator"></div>
+      <div class="fg"><label>New Password (min 6 chars)</label><input id="mEditPw" type="text" placeholder="${hasPw?'Leave blank to keep current':'Enter new password'}"><div style="font-size:11px;color:var(--muted);margin-top:2px">${hasPw?'Leave blank to keep existing password.':'Optional manual password.'}</div></div>
+    </div>
+    ${hasPw?`<div class="fg" style="margin-bottom:10px"><label style="display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer"><input type="checkbox" id="mRemovePw" style="width:auto"> Remove password (disable direct station password login)</label></div>`:''}
+    <div class="grid2"><div class="fg"><label>Client Organisation</label><input id="mEditClient" value="${esc(site.client||'')}"></div>
+    <div class="fg"><label>Project</label><input id="mEditProj" value="${esc(site.project||'')}"></div></div>
+    <div class="grid2"><div class="fg"><label>Latitude</label><input id="mEditLat" value="${site.lat!=null?site.lat:''}"></div><div class="fg"><label>Longitude</label><input id="mEditLng" value="${site.lng!=null?site.lng:''}"></div></div>`;
+  openModal('Edit Station &amp; Login — '+esc(site.code),body,async bg=>{
+    const name=bg.querySelector('#mEditName').value.trim();if(!name){toast('Enter station name',true);return false;}
+    const username=bg.querySelector('#mEditUser').value.trim();
+    const pw=bg.querySelector('#mEditPw').value.trim();
+    const removePw=bg.querySelector('#mRemovePw')?.checked||false;
+    const client=bg.querySelector('#mEditClient').value.trim();
+    const proj=bg.querySelector('#mEditProj').value.trim();
+    const lat=bg.querySelector('#mEditLat').value.trim();
+    const lng=bg.querySelector('#mEditLng').value.trim();
+    if(pw&&pw.length<6){toast('Password must be 6+ chars',true);return false;}
+    try{
+      const res=await API.put('/sites/'+encodeURIComponent(site.code),{name,username:username||site.code,password:pw||undefined,remove_password:removePw,client,project:proj,lat,lng});
+      site.name=res.name||name;site.username=res.username||username;site.client=res.client||client;site.project=res.project||proj;site.lat=res.lat!=null?res.lat:site.lat;site.lng=res.lng!=null?res.lng:site.lng;site.has_password=res.has_password;
+      toast('Station updated');go('sites');
+    }catch(e){toast(e.message,true);return false;}
+  },'Save Changes');
 }
 function sitePasswordModal(site){
-  const body=`<p style="color:var(--muted);margin-bottom:12px">Set manual login password for <b>${esc(site.name)}</b> (Code: <code>${esc(site.code)}</code>).</p>
-    <div class="fg"><label>New manual password (min 6 chars)</label><input id="mSiteNewPw" type="text" placeholder="enter password"></div>`;
-  openModal('Site Password — '+esc(site.code),body,async bg=>{
-    const p=bg.querySelector('#mSiteNewPw').value;
-    if(!p||p.length<6){toast('Password must be 6+ characters',true);return false;}
-    try{await API.post('/sites/'+encodeURIComponent(site.code)+'/password',{password:p});
-      site.password=p;site.has_password=true;toast('Password updated for site '+site.code);go('sites');}catch(e){toast(e.message,true);return false;}
-  },'Set Password');
+  siteEditModal(site);
 }
 function deviceModal(presetSite){
   const opts=STATE.sites.map(s=>`<option value="${esc(s.code)}" ${presetSite===s.code?'selected':''}>${esc(s.name)}</option>`).join('');

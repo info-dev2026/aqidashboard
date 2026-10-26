@@ -77,8 +77,8 @@ document.querySelectorAll('.role-tab').forEach((t) => {
     document.querySelectorAll('.role-tab').forEach((x) => x.classList.remove('on'));
     t.classList.add('on');
     selRole = t.dataset.r;
-    $('#uL').textContent = selRole === 'client' ? 'Client ID / Site Code' : 'User ID';
-    $('#u').placeholder = selRole === 'client' ? 'e.g. escorts or S1' : (selRole === 'admin' ? 'admin' : 'service');
+    $('#uL').textContent = selRole === 'client' ? 'Client ID / Station Username / Code' : 'User ID';
+    $('#u').placeholder = selRole === 'client' ? 'e.g. escorts, S1, or station username' : (selRole === 'admin' ? 'admin' : 'service');
   };
 });
 
@@ -407,7 +407,7 @@ function renderSites(c) {
                 ${hasPw ? '🔒 Password' : '🔓 No Pwd'}
               </span>
             </div>
-            <div class="cl">Code: <b>${esc(s.code)}</b> · ${esc(s.client)}</div>
+            <div class="cl">Code: <b>${esc(s.code)}</b> · User: <b>${esc(s.username || s.code)}</b> · ${esc(s.client)}</div>
             <div class="site-metrics">
               <div class="m"><div class="mv" style="color:${sc.color}">${on.length ? sa : '—'}</div><div class="ml">AQI</div></div>
               <div class="m"><div class="mv">${devs.length}</div><div class="ml">Devices</div></div>
@@ -417,18 +417,18 @@ function renderSites(c) {
           <div class="site-foot" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
             <span>📍 ${s.lat != null ? s.lat : '—'}, ${s.lng != null ? s.lng : '—'}</span>
             <div style="display:flex;gap:6px">
-              ${canEdit ? `<button class="btn btn-ghost btn-sm" data-pw="${esc(s.code)}" title="Set/Change manual password">🔑 Password</button>` : ''}
+              ${canEdit ? `<button class="btn btn-ghost btn-sm" data-edit="${esc(s.code)}" title="Edit station details, username & password">⚙ Edit &amp; Login</button>` : ''}
               ${canEdit ? `<button class="btn btn-ghost btn-sm" data-add="${esc(s.code)}">+ Device</button>` : ''}
             </div>
           </div>
         `;
         grid.appendChild(cardEl);
         if (canEdit) {
-          const pwBtn = cardEl.querySelector('[data-pw]');
-          if (pwBtn) {
-            pwBtn.onclick = (e) => {
+          const editBtn = cardEl.querySelector('[data-edit]');
+          if (editBtn) {
+            editBtn.onclick = (e) => {
               e.stopPropagation();
-              sitePasswordModal(s);
+              siteEditModal(s);
             };
           }
           const addBtn = cardEl.querySelector('[data-add]');
@@ -1066,28 +1066,51 @@ async function renderAudit(c) {
 
 /* ===== MODAL BUILDERS ===== */
 function siteModal() {
+  const clients = [...new Set(STATE.sites.map((s) => s.client))];
+  const clientDataList = clients.map((c) => `<option value="${esc(c)}">`).join('');
   const body = `
     <div class="grid2">
-      <div class="fg"><label>Site Code (ID)</label><input id="mScode" placeholder="e.g. S4 (auto if blank)"></div>
-      <div class="fg"><label>Site Name</label><input id="mSname" placeholder="e.g. Plant-4 Assembly"></div>
+      <div class="fg">
+        <label>Station Code (ID)</label>
+        <input id="mScode" placeholder="e.g. S4 (auto if blank)">
+      </div>
+      <div class="fg">
+        <label>Station Name</label>
+        <input id="mSname" placeholder="e.g. Faridabad Plant-4">
+      </div>
     </div>
     <div class="grid2">
-      <div class="fg"><label>Client Organisation</label><input id="mSclient" placeholder="e.g. Escorts Kubota Ltd"></div>
-      <div class="fg"><label>Project Name</label><input id="mSproject" placeholder="e.g. Ambient Air Network"></div>
+      <div class="fg">
+        <label>Station Username (Login ID)</label>
+        <input id="mSuser" placeholder="e.g. plant4_user (default: Station Code)">
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">Used to log in under Client tab. Defaults to Station Code if blank.</div>
+      </div>
+      <div class="fg">
+        <label>Station Password (Optional, min 6 chars)</label>
+        <input id="mSpassword" type="text" placeholder="Set manual login password">
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">Allows direct sign in using this Station Username &amp; password.</div>
+      </div>
     </div>
-    <div class="fg">
-      <label>Manual Site Password (Optional, min 6 characters)</label>
-      <input id="mSpassword" type="text" placeholder="Set manual login password for site">
-      <div style="font-size:11px;color:var(--muted);margin-top:4px">Allows direct site-level login using this Site Code and password.</div>
+    <div class="grid2">
+      <div class="fg">
+        <label>Client Organisation</label>
+        <input id="mSclient" list="siteClients" placeholder="e.g. Escorts Kubota Ltd">
+        <datalist id="siteClients">${clientDataList}</datalist>
+      </div>
+      <div class="fg">
+        <label>Project Name</label>
+        <input id="mSproject" placeholder="e.g. Ambient Air Network">
+      </div>
     </div>
     <div class="grid2">
       <div class="fg"><label>Latitude</label><input id="mSlat" placeholder="e.g. 28.41"></div>
       <div class="fg"><label>Longitude</label><input id="mSlng" placeholder="e.g. 77.31"></div>
     </div>
   `;
-  openModal('Add Monitoring Site', body, async (bg) => {
+  openModal('Add Monitoring Station', body, async (bg) => {
     const code = bg.querySelector('#mScode').value.trim();
     const name = bg.querySelector('#mSname').value.trim();
+    const username = bg.querySelector('#mSuser').value.trim();
     const client = bg.querySelector('#mSclient').value.trim();
     const project = bg.querySelector('#mSproject').value.trim();
     const password = bg.querySelector('#mSpassword').value.trim();
@@ -1095,49 +1118,131 @@ function siteModal() {
     const lng = bg.querySelector('#mSlng').value.trim();
 
     if (!name || !client) {
-      toast('Site name and client are required', true);
+      toast('Station name and client organization are required', true);
       return false;
     }
     if (password && password.length < 6) {
-      toast('Site password must be at least 6 characters', true);
+      toast('Station password must be at least 6 characters', true);
       return false;
     }
     try {
-      await API.post('/sites', { code: code || undefined, name, client, project, lat, lng, password: password || undefined });
-      toast('Site created');
+      await API.post('/sites', {
+        code: code || undefined,
+        username: username || undefined,
+        name,
+        client,
+        project,
+        lat,
+        lng,
+        password: password || undefined
+      });
+      toast('Station created successfully');
       go('sites');
     } catch (err) {
       toast(err.message, true);
       return false;
     }
-  }, 'Create Site');
+  }, 'Create Station');
+}
+
+function siteEditModal(site) {
+  const hasPw = site.has_password || site.pass_hash;
+  const body = `
+    <div class="grid2">
+      <div class="fg">
+        <label>Station Code (ID)</label>
+        <input id="mEditCode" value="${esc(site.code)}" disabled style="background:var(--bg);cursor:not-allowed">
+      </div>
+      <div class="fg">
+        <label>Station Name</label>
+        <input id="mEditName" value="${esc(site.name)}">
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="fg">
+        <label>Station Username (Login ID)</label>
+        <input id="mEditUser" value="${esc(site.username || site.code)}" placeholder="e.g. plant_operator">
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">Login username under Client tab.</div>
+      </div>
+      <div class="fg">
+        <label>New Station Password (min 6 chars)</label>
+        <input id="mEditPw" type="text" placeholder="${hasPw ? 'Enter new password to change' : 'Set manual password'}">
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">${hasPw ? 'Leave blank to keep existing password unchanged.' : 'Optional manual login password.'}</div>
+      </div>
+    </div>
+    ${hasPw ? `
+      <div class="fg" style="margin-bottom:12px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer">
+          <input type="checkbox" id="mRemovePw" style="width:auto"> Remove existing password (disable direct station password login)
+        </label>
+      </div>
+    ` : ''}
+    <div class="grid2">
+      <div class="fg">
+        <label>Client Organisation</label>
+        <input id="mEditClient" value="${esc(site.client || '')}">
+      </div>
+      <div class="fg">
+        <label>Project Name</label>
+        <input id="mEditProject" value="${esc(site.project || '')}">
+      </div>
+    </div>
+    <div class="grid2">
+      <div class="fg"><label>Latitude</label><input id="mEditLat" value="${site.lat != null ? site.lat : ''}" placeholder="e.g. 28.41"></div>
+      <div class="fg"><label>Longitude</label><input id="mEditLng" value="${site.lng != null ? site.lng : ''}" placeholder="e.g. 77.31"></div>
+    </div>
+  `;
+
+  openModal('Edit Station &amp; Login — ' + esc(site.code), body, async (bg) => {
+    const name = bg.querySelector('#mEditName').value.trim();
+    const username = bg.querySelector('#mEditUser').value.trim();
+    const password = bg.querySelector('#mEditPw').value.trim();
+    const removePw = bg.querySelector('#mRemovePw')?.checked || false;
+    const client = bg.querySelector('#mEditClient').value.trim();
+    const project = bg.querySelector('#mEditProject').value.trim();
+    const lat = bg.querySelector('#mEditLat').value.trim();
+    const lng = bg.querySelector('#mEditLng').value.trim();
+
+    if (!name || !client) {
+      toast('Station name and client organization are required', true);
+      return false;
+    }
+    if (password && password.length < 6) {
+      toast('Station password must be at least 6 characters', true);
+      return false;
+    }
+
+    try {
+      const res = await API.put('/sites/' + encodeURIComponent(site.code), {
+        name,
+        username: username || site.code,
+        password: password || undefined,
+        remove_password: removePw,
+        client,
+        project,
+        lat,
+        lng
+      });
+
+      site.name = res.name || name;
+      site.username = res.username || username;
+      site.client = res.client || client;
+      site.project = res.project || project;
+      site.lat = res.lat != null ? res.lat : (lat ? parseFloat(lat) : null);
+      site.lng = res.lng != null ? res.lng : (lng ? parseFloat(lng) : null);
+      site.has_password = res.has_password;
+
+      toast(`Station "${site.code}" updated successfully`);
+      go('sites');
+    } catch (err) {
+      toast(err.message, true);
+      return false;
+    }
+  }, 'Save Changes');
 }
 
 function sitePasswordModal(site) {
-  const body = `
-    <p style="color:var(--muted);margin-bottom:14px">Set or change the manual login password for <b>${esc(site.name)}</b> (Code: <code>${esc(site.code)}</code>).</p>
-    <div class="fg">
-      <label>Manual Site Password (min 6 characters)</label>
-      <input id="mSitePw" type="text" placeholder="Enter manual site password">
-      <div style="font-size:11.5px;color:var(--muted);margin-top:4px">Users can sign in under Client tab using Site ID <b>${esc(site.code)}</b> and this password.</div>
-    </div>
-  `;
-  openModal('Site Password — ' + esc(site.code), body, async (bg) => {
-    const password = bg.querySelector('#mSitePw').value;
-    if (!password || password.length < 6) {
-      toast('Password must be at least 6 characters', true);
-      return false;
-    }
-    try {
-      await API.post('/sites/' + encodeURIComponent(site.code) + '/password', { password });
-      toast('Password updated for site ' + site.code);
-      site.has_password = true;
-      go('sites');
-    } catch (err) {
-      toast(err.message, true);
-      return false;
-    }
-  }, 'Set Site Password');
+  siteEditModal(site);
 }
 
 function deviceModal(defaultSiteCode) {

@@ -69,8 +69,13 @@ const path = require('path');
         console.log('Initial seed data applied successfully.');
       }
     } else {
-      // Auto-migrate sites table to ensure pass_hash exists if upgrading
+      // Auto-migrate sites table to ensure pass_hash and username exist if upgrading
       await pool.query('ALTER TABLE sites ADD COLUMN IF NOT EXISTS pass_hash TEXT');
+      await pool.query('ALTER TABLE sites ADD COLUMN IF NOT EXISTS username VARCHAR(64)');
+      await pool.query("UPDATE sites SET username = code WHERE username IS NULL OR username = ''");
+      try {
+        await pool.query('CREATE UNIQUE INDEX IF NOT EXISTS idx_sites_username ON sites(LOWER(username))');
+      } catch (_) {}
     }
   } catch (err) {
     console.warn('Database initialization note:', err.message);

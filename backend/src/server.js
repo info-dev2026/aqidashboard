@@ -220,9 +220,11 @@ app.post('/api/login', loginLimiter, async (req, res) => {
       });
     }
 
-    // 2. If not found in users, check if authenticating directly as a site (by site code or name)
+    // 2. If not found in users, check if authenticating directly as a site (by site code, username, or name)
     const siteResult = await query(
-      'SELECT * FROM sites WHERE (code = $1 OR LOWER(name) = LOWER($1)) AND pass_hash IS NOT NULL',
+      `SELECT * FROM sites 
+       WHERE (LOWER(COALESCE(username, code)) = LOWER($1) OR LOWER(code) = LOWER($1) OR LOWER(name) = LOWER($1))
+         AND pass_hash IS NOT NULL`,
       [cleanUser]
     );
     const site = siteResult.rows[0];
@@ -236,7 +238,7 @@ app.post('/api/login', loginLimiter, async (req, res) => {
 
       const siteUser = {
         code: site.code,
-        username: site.code,
+        username: site.username || site.code,
         name: site.name,
         role: 'client',
         client: site.client,
@@ -245,11 +247,11 @@ app.post('/api/login', loginLimiter, async (req, res) => {
 
       const token = A.sign(siteUser);
       res.cookie('szsession', token, cookieOpts);
-      await audit(site.code, 'site_login_ok', `site=${site.name}`, ip(req));
+      await audit(siteUser.username, 'site_login_ok', `site=${site.name}`, ip(req));
       return res.json({
         token,
         user: {
-          username: site.code,
+          username: siteUser.username,
           role: 'client',
           name: site.name,
           client: site.client,
@@ -291,7 +293,7 @@ app.get('/api/sites', A.authOptional, async (req, res) => {
     const siteScope = A.scopeSite(req);
     const clientScope = A.scopeClient(req);
 
-    let sql = `SELECT id, code, name, client, project, lat, lng, created_at,
+    let sql = `SELECT id, code, COALESCE(username, code) AS username, name, client, project, lat, lng, created_at,
                       (pass_hash IS NOT NULL) AS has_password
                FROM sites`;
     let params = [];
@@ -328,72 +330,199 @@ app.post(
   A.authRequired,
   A.requireRole('admin', 'service'),
   async (req, res) => {
-    const { code: rawCode, name, client, project, lat, lng, password } = req.body || {};
+    const { code: rawCode, username: rawUsername, name, client, project, lat, lng, password } = req.body || {};
     if (!name || !client) {
       return res.status(400).json({ error: 'Site name and client required' });
     }
 
-  let code = (rawCode && String(rawCode).trim().toUpperCase()) || ('S' + Date.now().toString(36).toUpperCase());
-  // Validate site code
-  if (!/^[A-Z0-9_-]{2,32}$/i.test(code)) {
-    return res.status(400).json({ error: 'Site code must be 2-32 alphanumeric characters' });
-  }
-
-  let passHash = null;
-  if (password) {
-    if (typeof password !== 'string' || password.length < 6) {
-      return res.status(400).json({ error: 'Site password must be at least 6 characters' });
+    let code = (rawCode && String(rawCode).trim().toUpperCase()) || ('S' + Date.now().toString(36).toUpperCase());
+    // Validate site code
+    if (!/^[A-Z0-9_-]{2,32}$/i.test(code)) {
+      return res.status(400).json({ error: 'Site code must be 2-32 alphanumeric characters' });
     }
-    passHash = A.hash(password);
+
+    let username = (rawUsername && String(rawUsername).trim()) || code;
+    if (!/^[A-Za-z0-9_-]{2,64}$/.test(username)) {
+      return res.status(400).json({ error: 'Station username must be 2-64 alphanumeric characters, underscores or hyphens' });
+    }
+
+    let passHash = null;
+    if (password) {
+      if (typeof password !== 'string' || password.length < 6) {
+        return res.status(400).json({ error: 'Site password must be at least 6 characters' });
+      }
+      passHash = A.hash(password);
+    }
+
+    try {
+      const exists = await query('SELECT 1 FROM sites WHERE LOWER(code) = LOWER($1)', [code]);
+      if (exists.rows.length > 0) {
+        return res.status(409).json({ error: `Site code "${code}" already exists` });
+      }
+
+      const userExists = await query('SELECT 1 FROM users WHERE LOWER(username) = LOWER($1)', [username]);
+      if (userExists.rows.length > 0) {
+        return res.status(409).json({ error: `Username "${username}" is already taken by a system user` });
+      }
+
+      const siteUserExists = await query('SELECT 1 FROM sites WHERE LOWER(username) = LOWER($1)', [username]);
+      if (siteUserExists.rows.length > 0) {
+        return res.status(409).json({ error: `Station username "${username}" is already taken by another station` });
+      }
+
+      await query(
+        'INSERT INTO sites (code, username, name, client, project, lat, lng, pass_hash) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        [code, username, name, client, project || 'General', num(lat), num(lng), passHash]
+      );
+      await audit(req.user.u, 'site_add', `${code} (user=${username}, pwd=${!!passHash})`, ip(req));
+      res.status(201).json({ code, username, name, has_password: !!passHash });
+    } catch (err) {
+      console.error('Create site error:', err);
+      res.status(500).json({ error: 'Failed to create site' });
+    }
+  }
+);
+
+/* Update Existing Station Details, Username, or Password */
+const updateStationHandler = async (req, res) => {
+  const { code } = req.params;
+  const { username: newUsername, password, remove_password, name, client, project, lat, lng } = req.body || {};
+
+  // Admin and Service can change any site; a site user can only change their own site's credentials
+  if (req.user.role === 'client' && req.user.site_code !== code) {
+    return res.status(403).json({ error: 'Insufficient permissions to update this station' });
   }
 
   try {
-    const exists = await query('SELECT 1 FROM sites WHERE code = $1', [code]);
-    if (exists.rows.length > 0) {
-      return res.status(409).json({ error: `Site code "${code}" already exists` });
+    const siteRes = await query('SELECT * FROM sites WHERE code = $1', [code]);
+    if (siteRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Station not found' });
+    }
+    const currentSite = siteRes.rows[0];
+
+    let updatedUsername = currentSite.username || currentSite.code;
+    if (newUsername !== undefined && newUsername !== null && String(newUsername).trim() !== '') {
+      const cleanU = String(newUsername).trim();
+      if (!/^[A-Za-z0-9_-]{2,64}$/.test(cleanU)) {
+        return res.status(400).json({ error: 'Station username must be 2-64 alphanumeric characters, underscores or hyphens' });
+      }
+      const uCheck = await query('SELECT 1 FROM users WHERE LOWER(username) = LOWER($1)', [cleanU]);
+      if (uCheck.rows.length > 0) {
+        return res.status(409).json({ error: `Username "${cleanU}" is taken by a system user` });
+      }
+      const sCheck = await query('SELECT 1 FROM sites WHERE LOWER(username) = LOWER($1) AND code <> $2', [cleanU, code]);
+      if (sCheck.rows.length > 0) {
+        return res.status(409).json({ error: `Username "${cleanU}" is in use by another station` });
+      }
+      updatedUsername = cleanU;
     }
 
-    await query(
-      'INSERT INTO sites (code, name, client, project, lat, lng, pass_hash) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-      [code, name, client, project || 'General', num(lat), num(lng), passHash]
-    );
-    await audit(req.user.u, 'site_add', `${code} (pwd=${!!passHash})`, ip(req));
-    res.status(201).json({ code, name, has_password: !!passHash });
-  } catch (err) {
-    console.error('Create site error:', err);
-    res.status(500).json({ error: 'Failed to create site' });
-  }
-});
+    let updatedPassHash = currentSite.pass_hash;
+    if (remove_password === true) {
+      updatedPassHash = null;
+    } else if (password !== undefined && password !== null && password !== '') {
+      if (typeof password !== 'string' || password.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      }
+      updatedPassHash = A.hash(password);
+    }
 
-/* Update or Set Site Password Manually */
-app.post('/api/sites/:code/password', A.authRequired, async (req, res) => {
+    const updatedName = name !== undefined && name !== null && String(name).trim() !== '' ? String(name).trim() : currentSite.name;
+    const updatedClient = client !== undefined && client !== null && String(client).trim() !== '' ? String(client).trim() : currentSite.client;
+    const updatedProj = project !== undefined && project !== null ? String(project).trim() : currentSite.project;
+    const updatedLat = lat !== undefined && lat !== '' ? num(lat) : currentSite.lat;
+    const updatedLng = lng !== undefined && lng !== '' ? num(lng) : currentSite.lng;
+
+    await query(
+      `UPDATE sites
+       SET username = $1, pass_hash = $2, name = $3, client = $4, project = $5, lat = $6, lng = $7
+       WHERE code = $8`,
+      [updatedUsername, updatedPassHash, updatedName, updatedClient, updatedProj, updatedLat, updatedLng, code]
+    );
+
+    await audit(req.user.u, 'site_update', `${code} (user=${updatedUsername}, pwd=${!!updatedPassHash})`, ip(req));
+    res.json({
+      ok: true,
+      code,
+      username: updatedUsername,
+      name: updatedName,
+      client: updatedClient,
+      project: updatedProj,
+      lat: updatedLat,
+      lng: updatedLng,
+      has_password: !!updatedPassHash,
+      message: `Station ${code} updated successfully`
+    });
+  } catch (err) {
+    console.error('Update station error:', err);
+    res.status(500).json({ error: 'Failed to update station' });
+  }
+};
+
+app.put('/api/sites/:code', A.authRequired, updateStationHandler);
+app.patch('/api/sites/:code', A.authRequired, updateStationHandler);
+
+/* Update or Set Station Password & Credentials Manually */
+const handleSiteCredentials = async (req, res) => {
   const { code } = req.params;
-  const { password } = req.body || {};
+  const { username: newUsername, password, remove_password } = req.body || {};
 
   // Admin and Service can change any site's password; a site user can only change their own site's password
   if (req.user.role === 'client' && req.user.site_code !== code) {
     return res.status(403).json({ error: 'Insufficient permissions to update this site password' });
   }
 
-  if (typeof password !== 'string' || password.length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters' });
-  }
-
   try {
-    const siteRes = await query('SELECT code, name FROM sites WHERE code = $1', [code]);
+    const siteRes = await query('SELECT code, username, name, pass_hash FROM sites WHERE code = $1', [code]);
     if (siteRes.rows.length === 0) {
       return res.status(404).json({ error: 'Site not found' });
     }
+    const currentSite = siteRes.rows[0];
 
-    const passHash = A.hash(password);
-    await query('UPDATE sites SET pass_hash = $1 WHERE code = $2', [passHash, code]);
-    await audit(req.user.u, 'site_password_update', code, ip(req));
-    res.json({ ok: true, message: `Password updated for site ${code}` });
+    let updatedUsername = currentSite.username || currentSite.code;
+    if (newUsername !== undefined && newUsername !== null && String(newUsername).trim() !== '') {
+      const cleanU = String(newUsername).trim();
+      if (!/^[A-Za-z0-9_-]{2,64}$/.test(cleanU)) {
+        return res.status(400).json({ error: 'Station username must be 2-64 alphanumeric characters, underscores or hyphens' });
+      }
+      const uCheck = await query('SELECT 1 FROM users WHERE LOWER(username) = LOWER($1)', [cleanU]);
+      if (uCheck.rows.length > 0) {
+        return res.status(409).json({ error: `Username "${cleanU}" is taken by a system user` });
+      }
+      const sCheck = await query('SELECT 1 FROM sites WHERE LOWER(username) = LOWER($1) AND code <> $2', [cleanU, code]);
+      if (sCheck.rows.length > 0) {
+        return res.status(409).json({ error: `Username "${cleanU}" is in use by another station` });
+      }
+      updatedUsername = cleanU;
+    }
+
+    let updatedPassHash = currentSite.pass_hash;
+    if (remove_password === true) {
+      updatedPassHash = null;
+    } else if (password !== undefined && password !== null && password !== '') {
+      if (typeof password !== 'string' || password.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      }
+      updatedPassHash = A.hash(password);
+    }
+
+    await query('UPDATE sites SET username = $1, pass_hash = $2 WHERE code = $3', [updatedUsername, updatedPassHash, code]);
+    await audit(req.user.u, 'site_password_update', `${code} (user=${updatedUsername}, pwd=${!!updatedPassHash})`, ip(req));
+    res.json({
+      ok: true,
+      code,
+      username: updatedUsername,
+      has_password: !!updatedPassHash,
+      message: `Credentials updated for site ${code}`
+    });
   } catch (err) {
-    console.error('Update site password error:', err);
-    res.status(500).json({ error: 'Failed to update site password' });
+    console.error('Update site credentials error:', err);
+    res.status(500).json({ error: 'Failed to update site credentials' });
   }
-});
+};
+
+app.post('/api/sites/:code/password', A.authRequired, handleSiteCredentials);
+app.post('/api/sites/:code/credentials', A.authRequired, handleSiteCredentials);
 
 /* ================= DEVICES ================= */
 app.get('/api/devices', A.authRequired, async (req, res) => {

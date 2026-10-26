@@ -164,11 +164,13 @@ function cookieOf(res) {
     chk('public /api/sites 200 without auth', r.status === 200 && Array.isArray(r.body) && r.body.length >= 3);
     chk('public /api/sites does not leak pass_hash', !r.body.some((s) => s.pass_hash));
 
-    // 16. Admin creates site with manual password
+    // 16. Admin creates station with custom username & manual password
     const testSiteCode = 'TEST_SITE_1';
+    const testSiteUser = 'test_operator_1';
     await query('DELETE FROM sites WHERE code = $1', [testSiteCode]);
     r = await request(app).post('/api/sites').set('Cookie', adminCk).send({
       code: testSiteCode,
+      username: testSiteUser,
       name: 'Test Industrial Site',
       client: 'Test Industries Ltd',
       project: 'Testing Network',
@@ -176,26 +178,37 @@ function cookieOf(res) {
       lat: 28.5,
       lng: 77.2
     });
-    chk('admin creates site with manual password (201)', r.status === 201 && r.body.has_password === true);
+    chk('admin creates station with custom username & password (201)', r.status === 201 && r.body.has_password === true && r.body.username === testSiteUser);
 
-    // 17. Update site password via /api/sites/:code/password
-    r = await request(app).post(`/api/sites/${testSiteCode}/password`).set('Cookie', adminCk).send({
-      password: 'Site#UpdatedPassword2026'
-    });
-    chk('admin updates site password (200)', r.status === 200 && r.body.ok === true);
-
-    // 18. Login with site code + manual password
+    // 17. Login using the custom station username
     r = await request(app).post('/api/login').send({
-      username: testSiteCode,
+      username: testSiteUser,
+      password: 'Site#TestPassword2026',
+      role: 'client'
+    });
+    chk('login with custom station username (200)', r.status === 200 && r.body.user.site_code === testSiteCode && r.body.user.username === testSiteUser);
+
+    // 18. Update existing station username and password via PUT /api/sites/:code
+    const testSiteUserUpdated = 'test_operator_renamed';
+    r = await request(app).put(`/api/sites/${testSiteCode}`).set('Cookie', adminCk).send({
+      username: testSiteUserUpdated,
+      password: 'Site#UpdatedPassword2026',
+      name: 'Test Industrial Site Renamed'
+    });
+    chk('admin updates station username & password via PUT (200)', r.status === 200 && r.body.ok === true && r.body.username === testSiteUserUpdated);
+
+    // 19. Login with updated station username + updated password
+    r = await request(app).post('/api/login').send({
+      username: testSiteUserUpdated,
       password: 'Site#UpdatedPassword2026',
       role: 'client'
     });
-    chk('site login with manual password (200)', r.status === 200 && r.body.user.site_code === testSiteCode);
+    chk('station login with updated username & password (200)', r.status === 200 && r.body.user.site_code === testSiteCode && r.body.user.username === testSiteUserUpdated);
     const siteCk = cookieOf(r);
 
-    // 19. Scoped site user sees only their site
+    // 20. Scoped site user sees only their site with username
     r = await request(app).get('/api/sites').set('Cookie', siteCk);
-    chk('site user sees only their own site', r.status === 200 && r.body.length === 1 && r.body[0].code === testSiteCode);
+    chk('site user sees only their own site with username', r.status === 200 && r.body.length === 1 && r.body[0].code === testSiteCode && r.body[0].username === testSiteUserUpdated);
 
     // Clean up test site
     await query('DELETE FROM sites WHERE code = $1', [testSiteCode]);

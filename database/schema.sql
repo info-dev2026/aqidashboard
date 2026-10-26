@@ -27,6 +27,7 @@ CREATE INDEX idx_users_client ON users(client);
 CREATE TABLE sites (
     id SERIAL PRIMARY KEY,
     code VARCHAR(32) UNIQUE NOT NULL,
+    username VARCHAR(64) UNIQUE,
     name VARCHAR(128) NOT NULL,
     client VARCHAR(128) NOT NULL,
     project VARCHAR(128) NOT NULL,
@@ -38,6 +39,7 @@ CREATE TABLE sites (
 
 CREATE INDEX idx_sites_client ON sites(client);
 CREATE INDEX idx_sites_project ON sites(project);
+CREATE INDEX idx_sites_username ON sites(username);
 
 -- 3. Monitoring Devices Table
 CREATE TABLE devices (

@@ -51,9 +51,9 @@ const users = [
 ];
 
 const sites = [
-  ['S1', 'Faridabad Plant-1', 'Escorts Kubota Ltd',      'EKL Ambient Network', 28.41, 77.31, process.env.SEED_SITE_PW_S1 || 'Site#Faridabad1'],
-  ['S2', 'Faridabad Plant-3', 'Escorts Kubota Ltd',      'EKL Ambient Network', 28.39, 77.29, process.env.SEED_SITE_PW_S2 || 'Site#Faridabad3'],
-  ['S3', 'Ghaziabad Campus',  'Santosh Medical College', 'Campus Air Quality',  28.68, 77.44, process.env.SEED_SITE_PW_S3 || 'Site#Ghaziabad3']
+  ['S1', process.env.SEED_SITE_USER_S1 || 'S1', 'Faridabad Plant-1', 'Escorts Kubota Ltd',      'EKL Ambient Network', 28.41, 77.31, process.env.SEED_SITE_PW_S1 || 'Site#Faridabad1'],
+  ['S2', process.env.SEED_SITE_USER_S2 || 'S2', 'Faridabad Plant-3', 'Escorts Kubota Ltd',      'EKL Ambient Network', 28.39, 77.29, process.env.SEED_SITE_PW_S2 || 'Site#Faridabad3'],
+  ['S3', process.env.SEED_SITE_USER_S3 || 'S3', 'Ghaziabad Campus',  'Santosh Medical College', 'Campus Air Quality',  28.68, 77.44, process.env.SEED_SITE_PW_S3 || 'Site#Ghaziabad3']
 ];
 
 // [id, site, location, pm25, pm10, status, dev_type, p_inlet, p_outlet, raining, power_manual]
@@ -95,10 +95,10 @@ async function seed(poolInstance) {
     }
 
     console.log('Seeding monitoring sites...');
-    for (const [code, name, clientOrg, project, lat, lng, sitePw] of sites) {
+    for (const [code, username, name, clientOrg, project, lat, lng, sitePw] of sites) {
       await client.query(
-        'INSERT INTO sites (code, name, client, project, lat, lng, pass_hash) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [code, name, clientOrg, project, lat, lng, sitePw ? hash(sitePw) : null]
+        'INSERT INTO sites (code, username, name, client, project, lat, lng, pass_hash) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)',
+        [code, username || code, name, clientOrg, project, lat, lng, sitePw ? hash(sitePw) : null]
       );
     }
 
