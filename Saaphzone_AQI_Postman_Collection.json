@@ -306,6 +306,71 @@
           }
         },
         {
+          "name": "Switch OFF Analyzer (Stop & Lockout Logger)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"power\": \"off\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/devices/MAAPS-0012/control",
+              "host": ["{{baseUrl}}"],
+              "path": ["devices", "MAAPS-0012", "control"]
+            },
+            "description": "Switches OFF analyzer from dashboard. Dispatches stop & lockout payload commanding logger not to restart until dashboard starts it."
+          }
+        },
+        {
+          "name": "Switch ON Analyzer (Restart Allowed)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{authToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"power\": \"on\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/devices/MAAPS-0012/control",
+              "host": ["{{baseUrl}}"],
+              "path": ["devices", "MAAPS-0012", "control"]
+            },
+            "description": "Switches ON analyzer from dashboard and clears logger lockout."
+          }
+        },
+        {
+          "name": "Poll Logger Command Payload",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/devices/MAAPS-0012/command",
+              "host": ["{{baseUrl}}"],
+              "path": ["devices", "MAAPS-0012", "command"]
+            },
+            "description": "Endpoint for data logger to poll active remote command and lockout status."
+          }
+        },
+        {
           "name": "Remote Device Control (Power/Rain/Setpoints)",
           "request": {
             "method": "POST",

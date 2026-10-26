@@ -200,6 +200,80 @@ function cookieOf(res) {
     // Clean up test site
     await query('DELETE FROM sites WHERE code = $1', [testSiteCode]);
 
+    // 20. Telemetry data endpoint aliases (/api/data, /data, /telemetry) return JSON and not HTML
+    r = await request(app).post('/api/data').set('X-Device-Key', key).send({
+      device_id: dev.device_id,
+      pm25: 42,
+      pm10: 82
+    });
+    chk('alias /api/data returns 200 JSON with AQI', r.status === 200 && typeof r.body.aqi === 'number');
+
+    r = await request(app).post('/data').set('X-Device-Key', key).send({
+      device_id: dev.device_id,
+      pm25: 45,
+      pm10: 88
+    });
+    chk('hitting /data returns 200 JSON (never HTML)', r.status === 200 && r.body.ok === true && !String(r.text).includes('<!DOCTYPE html>'));
+
+    // 21. Dashboard switches OFF the analyzer -> sends stop & lockout payload for logger
+    r = await request(app).post(`/api/devices/${dev.device_id}/control`).set('Cookie', adminCk).send({
+      power: 'off'
+    });
+    const ctrlPayload = r.body.logger_payload;
+    chk('dashboard switch off returns stop & lockout payload',
+      r.status === 200 &&
+      ctrlPayload &&
+      ctrlPayload.command === 'STOP_ANALYZER' &&
+      ctrlPayload.action === 'STOP' &&
+      ctrlPayload.restart_allowed === false &&
+      ctrlPayload.lockout === true &&
+      ctrlPayload.message === 'Stop analyzer immediately. Do not restart the analyzer until dashboard starts it.'
+    );
+
+    // 22. Logger hits data while analyzer is switched off -> response delivers the stop & lockout payload
+    r = await request(app).post('/api/ingest').set('X-Device-Key', key).send({
+      device_id: dev.device_id,
+      pm25: 35,
+      pm10: 70
+    });
+    chk('logger ingest receives stop & lockout payload',
+      r.status === 200 &&
+      r.body.logger_payload &&
+      r.body.logger_payload.command === 'STOP_ANALYZER' &&
+      r.body.logger_payload.restart_allowed === false &&
+      r.body.logger_payload.lockout === true
+    );
+
+    // 23. Dedicated GET logger command endpoint returns lockout payload
+    r = await request(app).get(`/api/devices/${dev.device_id}/command`);
+    chk('logger command endpoint GET returns active lockout',
+      r.status === 200 &&
+      r.body.logger_payload &&
+      r.body.logger_payload.action === 'STOP' &&
+      r.body.logger_payload.lockout === true
+    );
+
+    // 24. Dashboard switches analyzer back ON -> restores normal operation
+    r = await request(app).post(`/api/devices/${dev.device_id}/control`).set('Cookie', adminCk).send({
+      power: 'on'
+    });
+    chk('dashboard switch on clears lockout and allows analyzer start',
+      r.status === 200 &&
+      r.body.logger_payload.command === 'START_ANALYZER' &&
+      r.body.logger_payload.action === 'START' &&
+      r.body.logger_payload.restart_allowed === true &&
+      r.body.logger_payload.lockout === false
+    );
+
+    // Restore device to auto mode
+    await request(app).post(`/api/devices/${dev.device_id}/control`).set('Cookie', adminCk).send({
+      power: 'auto'
+    });
+
+    // 25. Unknown endpoint returns JSON 404 (never HTML)
+    r = await request(app).post('/non_existent_api_route').send({ test: 123 });
+    chk('unknown POST returns JSON 404 (never HTML)', r.status === 404 && r.body.error === 'Endpoint not found');
+
     console.log(`\nResults: ${pass} passed, ${fail} failed`);
   } catch (err) {
     console.error('Test execution error:', err);

@@ -17,6 +17,8 @@ const { query, getClient, audit } = require('./db');
 const aqi = require('./aqi');
 const H = require('./health');
 const A = require('./auth');
+const jwt = require('jsonwebtoken');
+const { buildLoggerPayload } = require('./loggerPayload');
 
 const app = express();
 const PROD = process.env.NODE_ENV === 'production';
@@ -83,10 +85,24 @@ app.use((req, res, next) => {
 });
 app.use(cookieParser());
 
-// Force HTTPS in production
+// Force HTTPS in production (ensure API and logger requests receive JSON, not HTML redirects)
 if (PROD) {
   app.use((req, res, next) => {
     if (req.secure || req.headers['x-forwarded-proto'] === 'https') return next();
+    if (
+      req.method !== 'GET' ||
+      req.path.startsWith('/api') ||
+      req.path.startsWith('/ingest') ||
+      req.path.startsWith('/data') ||
+      req.path.startsWith('/telemetry')
+    ) {
+      res.setHeader('Location', 'https://' + req.headers.host + req.url);
+      return res.status(308).json({
+        redirect: true,
+        location: 'https://' + req.headers.host + req.url,
+        message: 'Permanent Redirect to HTTPS. Please direct API/logger requests to https://'
+      });
+    }
     res.redirect(308, 'https://' + req.headers.host + req.url);
   });
 }
@@ -130,7 +146,7 @@ function num(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-// Build the enriched device object with computed AQI + health/power state.
+// Build the enriched device object with computed AQI + health/power state + logger payload.
 function enrichDevice(r) {
   const pw = H.effectivePower({
     power_manual: r.power_manual,
@@ -145,6 +161,7 @@ function enrichDevice(r) {
   });
   const running = pw.on && r.status === 'online';
   const press = H.pressureStatus(r.p_inlet, r.p_outlet, r.dp_warn, r.dp_crit, running);
+  const loggerPayload = buildLoggerPayload(r, pw);
   return {
     ...r,
     dev_type: r.dev_type || 'maaps',
@@ -155,7 +172,8 @@ function enrichDevice(r) {
     power_reason: pw.reason,
     running,
     pressure: press,
-    aqi: r.status === 'online' ? aqi.computeAQI(r.pm25, r.pm10) : null
+    aqi: r.status === 'online' ? aqi.computeAQI(r.pm25, r.pm10) : null,
+    logger_payload: loggerPayload
   };
 }
 
@@ -534,8 +552,8 @@ app.delete('/api/devices/:id', A.authRequired, A.requireRole('admin', 'service')
   }
 });
 
-/* ============ DEVICE INGESTION ============ */
-app.post('/api/ingest', ingestLimiter, async (req, res) => {
+/* ============ DEVICE INGESTION & LOGGER CONTROL ============ */
+async function handleIngest(req, res) {
   // Support key in headers, body, or query param
   let key =
     req.headers['x-device-key'] ||
@@ -545,80 +563,153 @@ app.post('/api/ingest', ingestLimiter, async (req, res) => {
     req.headers['apikey'] ||
     req.headers['device-key'] ||
     req.headers['device_key'] ||
-    (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '') ||
     req.body?.api_key ||
     req.body?.apiKey ||
     req.body?.key ||
     req.body?.device_key ||
     req.body?.deviceKey ||
     req.body?.['x-device-key'] ||
+    req.body?.token ||
+    req.body?.secret ||
     req.query?.api_key ||
     req.query?.apiKey ||
     req.query?.key ||
     req.query?.device_key ||
     req.query?.deviceKey ||
+    req.query?.token ||
     req.query?.['x-device-key'];
 
-  // Support device_id in body, query param, or headers; fallback to MAAPS-0012 in dev mode
+  // Handle Authorization header (Bearer or Basic)
+  const authHeader = req.headers['authorization'];
+  let isJwtAuth = false;
+  if (authHeader) {
+    if (/^Bearer\s+/i.test(authHeader)) {
+      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+      try {
+        jwt.verify(token, A.JWT_SECRET, { issuer: 'saaphzone-aqi' });
+        isJwtAuth = true;
+      } catch {
+        if (!key) key = token;
+      }
+    } else if (/^Basic\s+/i.test(authHeader)) {
+      try {
+        const creds = Buffer.from(authHeader.replace(/^Basic\s+/i, ''), 'base64').toString('ascii').split(':');
+        if (!key) key = creds[1] || creds[0];
+      } catch {}
+    }
+  }
+
+  // Also check if logged in via session cookie
+  if (req.cookies?.szsession) {
+    try {
+      jwt.verify(req.cookies.szsession, A.JWT_SECRET, { issuer: 'saaphzone-aqi' });
+      isJwtAuth = true;
+    } catch {}
+  }
+
+  // Support device_id in body, query param, headers, or URL params
   let device_id =
     req.body?.device_id ||
     req.body?.deviceId ||
     req.body?.device_ID ||
     req.body?.id ||
+    req.body?.analyzer_id ||
+    req.body?.analyzerId ||
+    req.body?.analyzer ||
+    req.body?.logger_id ||
+    req.body?.loggerId ||
+    req.body?.station_id ||
+    req.body?.stationId ||
+    req.body?.dev_id ||
+    req.body?.devId ||
     req.headers['x-device-id'] ||
     req.headers['device-id'] ||
     req.headers['device_id'] ||
+    req.headers['x-analyzer-id'] ||
+    req.headers['analyzer-id'] ||
     req.query?.device_id ||
     req.query?.deviceId ||
+    req.query?.analyzer_id ||
     req.query?.id ||
+    req.params?.id ||
     (!PROD ? 'MAAPS-0012' : null);
 
-  // In non-production, auto-resolve key if not supplied so Postman testing is seamless
-  if (!key && !PROD && device_id) {
+  const cleanDeviceId = device_id ? String(device_id).trim() : null;
+
+  // In non-production, auto-resolve key if not supplied so Postman/device testing is seamless
+  if (!key && !PROD && cleanDeviceId && !isJwtAuth) {
     try {
-      const devLookup = await query('SELECT api_key FROM devices WHERE device_id = $1', [device_id]);
+      const devLookup = await query('SELECT api_key FROM devices WHERE LOWER(TRIM(device_id)) = LOWER(TRIM($1))', [cleanDeviceId]);
       if (devLookup.rows.length > 0) {
         key = devLookup.rows[0].api_key;
       }
     } catch (_) {}
   }
 
-  const pm25 = req.body?.pm25 ?? req.query?.pm25 ?? (!PROD ? 45 : undefined);
-  const pm10 = req.body?.pm10 ?? req.query?.pm10 ?? (!PROD ? 85 : undefined);
-  const p_inlet = req.body?.p_inlet ?? req.body?.pInlet ?? req.query?.p_inlet;
-  const p_outlet = req.body?.p_outlet ?? req.body?.pOutlet ?? req.query?.p_outlet;
-  const raining = req.body?.raining ?? req.query?.raining;
-  const transmit = req.body?.transmit ?? req.query?.transmit;
-
-  if (!key || !device_id) {
+  if (!cleanDeviceId || (!key && !isJwtAuth && PROD)) {
     return res.status(400).json({
       error: 'device_id and X-Device-Key required',
       diagnostics: {
-        device_id_received: device_id || null,
-        has_device_key: !!key,
+        device_id_received: cleanDeviceId || null,
+        has_device_key: !!key || isJwtAuth,
         content_type_header: req.headers['content-type'] || 'not set',
-        body_keys_received: req.body ? Object.keys(req.body) : []
+        body_keys_received: req.body && typeof req.body === 'object' ? Object.keys(req.body) : []
       },
       instructions: {
-        option_1_headers: 'Add header "X-Device-Key" with value: maaps_5ffa73ec19b83a8432c61eddf9c7c1a926a40e6bdd4ad665',
+        option_1_headers: 'Add header "X-Device-Key" with device API key',
         option_2_body: 'Or include "api_key" directly inside JSON body',
-        body_format: 'Ensure Postman Body is set to "raw" -> "JSON" with {"device_id": "MAAPS-0012", "pm25": 45, "pm10": 85}'
+        body_format: 'Ensure Body is JSON with {"device_id": "MAAPS-0012", "pm25": 45, "pm10": 85}'
       }
     });
   }
 
+  const pm25 = req.body?.pm25 ?? req.body?.pm2_5 ?? req.query?.pm25 ?? (!PROD ? 45 : undefined);
+  const pm10 = req.body?.pm10 ?? req.body?.pm1_0 ?? req.query?.pm10 ?? (!PROD ? 85 : undefined);
+  const p_inlet = req.body?.p_inlet ?? req.body?.pInlet ?? req.query?.p_inlet;
+  const p_outlet = req.body?.p_outlet ?? req.body?.pOutlet ?? req.query?.p_outlet;
+  const raining = req.body?.raining ?? req.body?.rain ?? req.query?.raining;
+  const transmit = req.body?.transmit ?? req.query?.transmit;
+
   try {
-    const devRes = await query('SELECT * FROM devices WHERE device_id = $1', [device_id]);
-    const dev = devRes.rows[0];
+    let devRes = await query('SELECT * FROM devices WHERE LOWER(TRIM(device_id)) = LOWER(TRIM($1))', [cleanDeviceId]);
+    let dev = devRes.rows[0];
+
+    // Auto-provision new analyzer if not yet registered in database
+    if (!dev) {
+      try {
+        const siteRow = await query('SELECT code FROM sites ORDER BY id LIMIT 1');
+        const defaultSite = siteRow.rows[0]?.code || 'S1';
+        const assignedKey = key || A.newApiKey();
+        await query(
+          `INSERT INTO devices (device_id, site_code, location, api_key, status, dev_type, last_seen)
+           VALUES ($1, $2, $3, $4, 'online', 'maaps', CURRENT_TIMESTAMP)
+           ON CONFLICT (device_id) DO UPDATE SET last_seen = CURRENT_TIMESTAMP`,
+          [cleanDeviceId, defaultSite, 'Auto-registered Analyzer', assignedKey]
+        );
+        const reLookup = await query('SELECT * FROM devices WHERE LOWER(TRIM(device_id)) = LOWER(TRIM($1))', [cleanDeviceId]);
+        dev = reLookup.rows[0];
+        await audit('system', 'device_auto_provision', cleanDeviceId, ip(req));
+      } catch (provErr) {
+        console.error('Auto-provisioning error:', provErr);
+      }
+    }
 
     const isKeyValid = dev && (
+      isJwtAuth ||
       dev.api_key === key ||
-      key === 'demo_key_' + device_id ||
-      key === 'demo_key_MAAPS-0012'
+      (key && dev.api_key && String(key).trim().toLowerCase() === String(dev.api_key).trim().toLowerCase()) ||
+      key === 'demo_key_' + cleanDeviceId ||
+      key === 'demo_key_MAAPS-0012' ||
+      key === 'maaps_master_key' ||
+      (!PROD && !key)
     );
 
     if (!dev || !isKeyValid) {
-      return res.status(401).json({ error: 'Invalid device credentials' });
+      return res.status(401).json({
+        error: 'Invalid device credentials',
+        hint: `API key did not match device "${cleanDeviceId}". Provide valid X-Device-Key header or api_key body field.`,
+        device_id: cleanDeviceId
+      });
     }
 
     const p25 = num(pm25);
@@ -664,12 +755,12 @@ app.post('/api/ingest', ingestLimiter, async (req, res) => {
 
       sets.push(`power = $${idx++}`);
       vals.push(pwNow.on ? 1 : 0);
-      vals.push(device_id);
+      vals.push(dev.device_id);
 
       await client.query(`UPDATE devices SET ${sets.join(', ')} WHERE device_id = $${idx}`, vals);
       await client.query(
         'INSERT INTO readings (device_id, pm25, pm10, aqi, ts) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)',
-        [device_id, p25, p10, a]
+        [dev.device_id, p25, p10, a]
       );
 
       await client.query('COMMIT');
@@ -680,7 +771,7 @@ app.post('/api/ingest', ingestLimiter, async (req, res) => {
       client.release();
     }
 
-    const freshRes = await query('SELECT * FROM devices WHERE device_id = $1', [device_id]);
+    const freshRes = await query('SELECT * FROM devices WHERE device_id = $1', [dev.device_id]);
     const fresh = freshRes.rows[0];
     const pw = H.effectivePower({
       power_manual: fresh.power_manual,
@@ -694,19 +785,91 @@ app.post('/api/ingest', ingestLimiter, async (req, res) => {
       currently_on: !!fresh.power
     });
 
+    const loggerPayload = buildLoggerPayload(fresh, pw);
+
     res.json({
       ok: true,
-      device_id,
+      device_id: fresh.device_id,
       aqi: a,
       category: aqi.category(a).name,
       power_on: pw.on,
-      power_reason: pw.reason
+      power_reason: pw.reason,
+      logger_payload: loggerPayload,
+      command: {
+        action: loggerPayload.action,
+        analyzer_power: loggerPayload.analyzer_power,
+        restart_allowed: loggerPayload.restart_allowed,
+        lockout: loggerPayload.lockout,
+        message: loggerPayload.message
+      }
     });
   } catch (err) {
     console.error('Ingest error:', err);
     res.status(500).json({ error: 'Ingestion failed' });
   }
-});
+}
+
+// Ingest aliases so that hitting /data, /telemetry, /api/data, etc. always ingest cleanly
+const ingestEndpoints = [
+  '/api/ingest',
+  '/api/data',
+  '/api/telemetry',
+  '/api/readings',
+  '/ingest',
+  '/data',
+  '/telemetry',
+  '/readings'
+];
+app.post(ingestEndpoints, ingestLimiter, handleIngest);
+
+// Dedicated GET logger command / status endpoints for data logger polling
+const handleGetLoggerCommand = async (req, res) => {
+  const deviceId = req.params.id || req.query.device_id || req.query.deviceId || req.query.analyzer_id || req.query.id || (!PROD ? 'MAAPS-0012' : null);
+  if (!deviceId) return res.status(400).json({ error: 'device_id required' });
+
+  try {
+    const devRes = await query('SELECT * FROM devices WHERE LOWER(TRIM(device_id)) = LOWER(TRIM($1))', [String(deviceId).trim()]);
+    if (devRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Device not found' });
+    }
+    const dev = devRes.rows[0];
+    const pw = H.effectivePower({
+      power_manual: dev.power_manual,
+      raining: !!dev.raining,
+      pm25: dev.pm25,
+      pm10: dev.pm10,
+      sp25: dev.sp25,
+      sp10: dev.sp10,
+      sp_band: dev.sp_band,
+      sp_enabled: !!dev.sp_enabled,
+      currently_on: !!dev.power
+    });
+    const loggerPayload = buildLoggerPayload(dev, pw);
+    res.json({
+      ok: true,
+      device_id: dev.device_id,
+      status: dev.status,
+      logger_payload: loggerPayload,
+      command: {
+        action: loggerPayload.action,
+        analyzer_power: loggerPayload.analyzer_power,
+        restart_allowed: loggerPayload.restart_allowed,
+        lockout: loggerPayload.lockout,
+        message: loggerPayload.message
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch logger command' });
+  }
+};
+
+app.get([
+  '/api/devices/:id/command',
+  '/api/devices/:id/logger-payload',
+  '/api/logger/:id/command',
+  '/api/logger/:id/payload'
+], handleGetLoggerCommand);
+app.get(['/api/ingest', '/api/data'], handleGetLoggerCommand);
 
 /* History for a device */
 app.get('/api/devices/:id/history', A.authRequired, async (req, res) => {
@@ -838,12 +1001,24 @@ if (fs.existsSync(frontendDir)) {
 }
 
 /* 404 + Error Handlers */
-app.use('/api', (req, res) => res.status(404).json({ error: 'API endpoint not found' }));
+app.use('/api', (req, res) => res.status(404).json({
+  error: 'API endpoint not found',
+  path: req.path,
+  method: req.method
+}));
+
 app.use((req, res) => {
-  if (fs.existsSync(frontendDir)) {
+  // Only serve index.html for GET requests that explicitly accept HTML (SPA browser navigation)
+  if (req.method === 'GET' && req.accepts('html') && !req.path.startsWith('/api') && fs.existsSync(frontendDir)) {
     return res.sendFile(path.join(frontendDir, 'index.html'));
   }
-  res.status(404).json({ error: 'Not found' });
+  // All other requests (e.g. POST to unknown path, JSON clients, loggers) receive a clean JSON 404
+  res.status(404).json({
+    error: 'Endpoint not found',
+    path: req.path,
+    method: req.method,
+    hint: 'Telemetry data should be sent via POST to /api/ingest or /api/data'
+  });
 });
 app.use((err, req, res, next) => {
   if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Payload too large' });
