@@ -232,11 +232,11 @@ tr:hover td{background:#f8faf8}
     <h1>AQI Monitoring Portal</h1>
     <div class="sub">MAAPS Ambient Air Network · PM2.5 &amp; PM10 · Real-time</div>
     <div class="role-tabs" id="roleTabs">
-      <div class="role-tab" data-r="admin">Admin</div>
+      <div class="role-tab on" data-r="admin">Admin</div>
       <div class="role-tab" data-r="service">Service</div>
-      <div class="role-tab on" data-r="client">Client</div>
+      <div class="role-tab" data-r="client">Client</div>
     </div>
-    <div class="fg"><label id="uL">Client ID</label><input id="u" autocomplete="username" placeholder="e.g. escorts"></div>
+    <div class="fg"><label id="uL">User ID</label><input id="u" autocomplete="username" placeholder="admin"></div>
     <div class="fg"><label>Password</label><input id="p" type="password" autocomplete="current-password" placeholder="••••••••"></div>
     <div class="gate-err" id="gateErr"></div>
     <button class="btn btn-primary" id="gateBtn" style="width:100%;justify-content:center">Sign in</button>
@@ -310,7 +310,7 @@ const NAV={
 };
 
 /* ---- LOGIN ---- */
-let selRole='client';
+let selRole='admin';
 document.querySelectorAll('.role-tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.role-tab').forEach(x=>x.classList.remove('on'));
   t.classList.add('on');selRole=t.dataset.r;
