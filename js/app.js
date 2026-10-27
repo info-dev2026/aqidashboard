@@ -70,7 +70,7 @@ const NAV = {
 };
 
 /* ===== LOGIN CONTROLLER ===== */
-let selRole = 'client';
+let selRole = 'admin';
 
 document.querySelectorAll('.role-tab').forEach((t) => {
   t.onclick = () => {
