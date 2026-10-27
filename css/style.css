@@ -247,10 +247,21 @@ input:focus, select:focus, textarea:focus {
 }
 .gate-logo {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   justify-content: center;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+}
+.gate-logo-img {
+  width: 140px;
+  height: auto;
+  max-width: 100%;
+  object-fit: contain;
+  border-radius: 12px;
+  display: block;
+  margin: 0 auto;
+  mix-blend-mode: multiply;
 }
 .gate-mark {
   width: 48px;
